@@ -347,6 +347,7 @@ async function renderProject(id) {
   document.getElementById("proj-exps").innerHTML = exps.map(expCard).join("")
     || `<div class="empty">No experiments yet. What's the next growth bet?</div>`;
   bindExpCards(metricsList);
+  _campCache = camps;
   document.getElementById("proj-camps").innerHTML = camps.map(campCard).join("")
     || `<div class="empty">No campaigns yet.</div>`;
   bindCampCards();
