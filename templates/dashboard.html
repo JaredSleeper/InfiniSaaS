@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>InfiniSaaS — Portfolio Cockpit</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/app.css?v=1">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">Infini<span>SaaS</span></a>
+    <nav class="nav">
+      <a href="#/" data-nav="cockpit">Cockpit</a>
+      <a href="#/experiments" data-nav="experiments">Experiments</a>
+      <a href="#/marketing" data-nav="marketing">Marketing</a>
+      <a href="#/learnings" data-nav="learnings">Learnings</a>
+    </nav>
+    <button class="btn btn-primary" id="new-project-btn">+ Project</button>
+  </header>
+  <main id="view" class="view"></main>
+
+  <div class="modal-backdrop hidden" id="modal-backdrop">
+    <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <script src="/static/app.js?v=1"></script>
+</body>
+</html>
