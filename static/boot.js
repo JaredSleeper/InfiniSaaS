@@ -4,10 +4,15 @@
   const cfg = window.INFINI || {};
 
   function showSignIn() {
-    $view.innerHTML = `<div class="signin"><div class="card" style="max-width:420px; margin:10vh auto; text-align:center">
+    $view.innerHTML = `<div class="signin">
       <h1 style="margin-bottom:6px">Infini<span style="color:var(--primary)">SaaS</span></h1>
-      <p class="muted">Sign in to open the cockpit.</p><div id="clerk-signin"></div></div></div>`;
-    window.Clerk.mountSignIn(document.getElementById("clerk-signin"), { appearance: { baseTheme: undefined } });
+      <p class="muted">Sign in to open the cockpit.</p><div id="clerk-signin"></div></div>`;
+    window.Clerk.mountSignIn(document.getElementById("clerk-signin"), {
+      appearance: {
+        baseTheme: undefined,
+        elements: { rootBox: { width: "100%", maxWidth: "25rem" }, cardBox: { width: "100%", maxWidth: "100%" } },
+      },
+    });
   }
 
   async function bootWithClerk() {

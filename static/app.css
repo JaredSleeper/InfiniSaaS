@@ -163,7 +163,14 @@ tr:last-child td { border-bottom: none; }
   word-break: break-all;
 }
 
+.signin { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 8vh 0 40px; }
+.signin #clerk-signin { width: 100%; display: flex; justify-content: center; margin-top: 12px; }
+.signin .cl-rootBox { width: 100% !important; max-width: 25rem; }
+.signin .cl-cardBox, .signin .cl-card { width: 100% !important; max-width: 100% !important; box-sizing: border-box; }
+
 @media (max-width: 720px) {
+  .view { padding: 16px 12px; }
+  .signin { padding-top: 4vh; }
   .strip { grid-template-columns: 4px 1fr 90px; }
   .strip .col-hide { display: none; }
   .grid-2 { grid-template-columns: 1fr; }
