@@ -5,7 +5,7 @@ window.V2 = window.V2 || { tabs: {} };
 (function () {
   const SOURCE_LABEL = {
     manual: "Manual", feature_request: "Feature request", recommendation: "Recommendation",
-    experiment: "Experiment",
+    experiment: "Experiment", landing_page: "Landing page",
   };
 
   let _projects = null;

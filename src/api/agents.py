@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import re
+from typing import get_args
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 
 from src.agents import llm, runner
-from src.api.crud import fetch_one, update_row
+from src.api.crud import fetch_one, insert_row, update_row
 from src.api.projects import require_project
 from src.db import get_pool
 from src.models import (
@@ -13,18 +15,22 @@ from src.models import (
     AgentOut,
     AgentRunOut,
     AgentUpdate,
+    Channel,
+    LandingPageCreate,
     RecommendationOut,
     RecommendationUpdate,
 )
 
 router = APIRouter()
 recs_router = APIRouter()
+CHANNELS = frozenset(get_args(Channel))
 
 DEFAULT_AGENTS = [
     ("weekly_brief", "Weekly brief", "weekly"),
     ("seo", "SEO agent", "weekly"),
     ("analytics", "Product analytics agent", "weekly"),
     ("ads", "Paid ads agent", "manual"),
+    ("landing_pages", "Landing page agent", "weekly"),
 ]
 
 
@@ -199,5 +205,52 @@ async def rec_to_experiment(rec_id: UUID) -> RecommendationOut:
         """,
         rec_id,
         exp["id"],
+    )
+    return RecommendationOut(**dict(row))
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:80] or "page"
+
+
+@recs_router.post("/{rec_id}/to-landing-page", response_model=RecommendationOut)
+async def rec_to_landing_page(rec_id: UUID) -> RecommendationOut:
+    """Accept a recommendation into a draft landing page, prefilled from its page brief."""
+    rec = await fetch_one("recommendations", rec_id)
+    if rec["project_id"] is None:
+        raise HTTPException(status_code=400, detail="Recommendation has no project")
+    if rec["landing_page_id"] is not None:
+        return RecommendationOut(**rec)
+    page = (rec.get("data") or {}).get("page") or {}
+    if not isinstance(page, dict):
+        page = {}
+    brief = LandingPageCreate(
+        name=rec["title"][:160],
+        path=str(page.get("path") or "/" + _slug(rec["title"])),
+        headline=str(page.get("headline", ""))[:300],
+        angle=str(page.get("angle", "")),
+        target_keyword=str(page.get("target_keyword", ""))[:200],
+        channel=page["channel"] if page.get("channel") in CHANNELS else "seo",
+        status="draft",
+        brief=rec["body"],
+    )
+    pool = await get_pool()
+    values = {"project_id": rec["project_id"], **brief.model_dump()}
+    base_path = values["path"]
+    for attempt in range(1, 6):
+        try:
+            lp = await insert_row("landing_pages", values)
+            break
+        except HTTPException as exc:
+            if exc.status_code != 409 or attempt == 5:
+                raise
+            values["path"] = f"{base_path}-{attempt + 1}"
+    row = await pool.fetchrow(
+        """
+        UPDATE recommendations SET landing_page_id = $2, status = 'accepted', updated_at = now()
+        WHERE id = $1 RETURNING *
+        """,
+        rec_id,
+        lp["id"],
     )
     return RecommendationOut(**dict(row))

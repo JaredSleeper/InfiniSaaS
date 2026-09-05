@@ -14,6 +14,7 @@ from src.api import (
     health,
     ingest,
     integrations,
+    landing,
     learnings,
     metrics,
     ops,
@@ -74,6 +75,8 @@ app.include_router(product.releases, prefix="/api/releases", dependencies=auth)
 app.include_router(product.content, prefix="/api/content", dependencies=auth)
 app.include_router(product.seo_keywords, prefix="/api/seo/keywords", dependencies=auth)
 app.include_router(seo.router, prefix="/api/seo", dependencies=auth)
+app.include_router(landing.perf_router, prefix="/api/landing-pages", dependencies=auth)
+app.include_router(landing.router, prefix="/api/landing-pages", dependencies=auth)
 app.include_router(devin.router, prefix="/api/devin", dependencies=auth)
 app.include_router(agents.router, prefix="/api/agents", dependencies=auth)
 app.include_router(agents.recs_router, prefix="/api/recommendations", dependencies=auth)

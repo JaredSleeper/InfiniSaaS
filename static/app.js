@@ -206,8 +206,8 @@ async function renderCockpit() {
 
 const PROJECT_TABS = [
   ["overview", "Overview"], ["wiki", "Wiki"], ["product", "Product"], ["growth", "Growth"],
-  ["analytics", "Analytics"], ["finance", "Finance"], ["ops", "Ops"], ["agents", "Agents"],
-  ["devin", "Devin"],
+  ["landing", "Landing pages"], ["analytics", "Analytics"], ["finance", "Finance"], ["ops", "Ops"],
+  ["agents", "Agents"], ["devin", "Devin"],
 ];
 
 async function renderProject(id, tab = "overview", sub) {
@@ -652,6 +652,9 @@ async function render() {
     } else if (hash === "#/inbox") {
       mark("inbox");
       await V2.renderInbox();
+    } else if (hash === "#/landing-pages") {
+      mark("landing");
+      await V2.renderLandingPages();
     } else if (hash === "#/devin") {
       mark("devin");
       await V2.renderDevin();

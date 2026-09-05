@@ -642,6 +642,7 @@ window.V2 = window.V2 || { tabs: {} };
     seo: "Runs an on-page audit + reads Search Console data, proposes content and technical fixes.",
     analytics: "Reads the event funnel, DAU and feature requests; flags drop-offs and activation gaps.",
     ads: "Reads ad spend, CAC, ROAS, CPC per platform and proposes budget shifts and creative tests.",
+    landing_pages: "Compares every landing page's funnel, Search Console and paid numbers against the wiki + keywords; proposes pages to build, test or retire.",
     custom: "Your own instructions on top of the project snapshot.",
   };
 
@@ -653,17 +654,29 @@ window.V2 = window.V2 || { tabs: {} };
         <span>${badge(r.kind)} <span class="badge impact-${r.impact}">${r.impact} impact</span> <span class="badge">${r.effort} effort</span></span>
       </div>
       <div style="font-size:13px; margin-top:6px">${esc(r.body)}</div>
+      ${pageBrief(r)}
       <div class="card-row" style="margin-top:8px">
         <span class="mono muted" style="font-size:11px">${proj ? `<span style="color:${esc(proj.accent_color)}">●</span> ${esc(proj.name)} · ` : ""}${fmtDate(r.created_at)}${r.status !== "open" ? " · " + badge(r.status) : ""}</span>
         ${r.status === "open" ? `<span>
           <button class="btn btn-sm btn-devin" data-rec-devin="${r.id}">◆ Devin</button>
+          ${r.project_id && r.kind === "landing_page" ? `<button class="btn btn-sm" data-rec-lp="${r.id}">→ Draft page</button>` : ""}
           ${r.project_id ? `<button class="btn btn-sm" data-rec-exp="${r.id}">→ Experiment</button>` : ""}
           <button class="btn btn-sm" data-rec-status="${r.id}" data-to="done">Done</button>
           <button class="btn btn-sm" data-rec-status="${r.id}" data-to="dismissed">Dismiss</button></span>`
-        : r.experiment_id ? `<a class="btn btn-sm" href="#/experiments">View experiment</a>` : r.devin_session_id ? `<a class="btn btn-sm" href="#/devin">View session</a>` : ""}
+        : r.landing_page_id ? `<a class="btn btn-sm" href="#/p/${r.project_id}/landing">View page</a>` : r.experiment_id ? `<a class="btn btn-sm" href="#/experiments">View experiment</a>` : r.devin_session_id ? `<a class="btn btn-sm" href="#/devin">View session</a>` : ""}
       </div>
     </div>`;
   };
+
+  function pageBrief(r) {
+    const pg = r.data && r.data.page;
+    if (!pg || !Object.keys(pg).length) return "";
+    const bits = [];
+    if (pg.path) bits.push(`<span class="mono">${esc(pg.path)}</span>`);
+    if (pg.target_keyword) bits.push(`🔍 ${esc(pg.target_keyword)}`);
+    if (pg.channel) bits.push(badge(pg.channel));
+    return `<div class="muted" style="font-size:12px; margin-top:6px">${bits.join(" · ")}${pg.headline ? `<div>“${esc(pg.headline)}”</div>` : ""}${pg.angle ? `<div><i>${esc(pg.angle)}</i></div>` : ""}</div>`;
+  }
 
   V2.bindRecCards = function (root, recs, rerender) {
     root.querySelectorAll("[data-rec-status]").forEach((b) => b.addEventListener("click", async () => {
@@ -671,6 +684,12 @@ window.V2 = window.V2 || { tabs: {} };
     }));
     root.querySelectorAll("[data-rec-exp]").forEach((b) => b.addEventListener("click", async () => {
       await api(`/api/recommendations/${b.dataset.recExp}/to-experiment`, { method: "POST" }); rerender();
+    }));
+    root.querySelectorAll("[data-rec-lp]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true;
+      try { await api(`/api/recommendations/${b.dataset.recLp}/to-landing-page`, { method: "POST" }); }
+      catch (ex) { alert(ex.message); }
+      rerender();
     }));
     root.querySelectorAll("[data-rec-devin]").forEach((b) => b.addEventListener("click", () => {
       const r = recs.find((x) => x.id === b.dataset.recDevin);
@@ -719,7 +738,7 @@ window.V2 = window.V2 || { tabs: {} };
               <div class="muted" style="font-size:12px; margin-top:4px">${esc(KIND_BLURB[a.kind])}${a.instructions ? `<br><i>${esc(a.instructions)}</i>` : ""}</div>
               <div class="card-row" style="margin-top:8px"><span class="mono muted" style="font-size:11px">${a.last_run_at ? "last run " + fmtDate(a.last_run_at) : "never run"}</span>
                 <span><button class="btn btn-sm" data-edit-agent="${a.id}">Edit</button> <button class="btn btn-sm btn-primary" data-run-agent="${a.id}">Run now</button></span></div>
-            </div>`).join("") || `<div class="empty">No agents for ${esc(p.name)}. Add the standard set: weekly brief, SEO, analytics, ads.</div>`}
+            </div>`).join("") || `<div class="empty">No agents for ${esc(p.name)}. Add the standard set: weekly brief, SEO, analytics, ads, landing pages.</div>`}
             <div class="section-head" style="margin-top:20px"><h3>Recent runs</h3></div>
             ${runs.map((r) => {
               const a = agents.find((x) => x.id === r.agent_id) || {};
