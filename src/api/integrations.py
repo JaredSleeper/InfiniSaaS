@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from src.api.projects import require_project
 from src.db import get_pool
+from src.errors import safe_error
 from src.integrations import github, gsc, railway, registry, slack, stripe
 from src.integrations.registry import PROVIDERS
 from src.models import IntegrationOut, IntegrationUpsert, Provider
@@ -93,8 +94,9 @@ async def _run(integration_id: UUID, action: str) -> dict:
         else:
             result = "Stored"
     except Exception as exc:  # noqa: BLE001
-        await registry.set_status(row["id"], "error", str(exc))
-        raise HTTPException(status_code=502, detail=str(exc)[:500]) from exc
+        msg = safe_error(exc)
+        await registry.set_status(row["id"], "error", msg)
+        raise HTTPException(status_code=502, detail=msg) from exc
     detail = result if isinstance(result, str) else f"Synced: {result}"
     await registry.set_status(row["id"], "ok", detail, synced=(action == "sync"))
     return {"ok": True, "detail": detail, "result": result}

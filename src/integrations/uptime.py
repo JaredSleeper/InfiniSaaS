@@ -8,6 +8,7 @@ import httpx
 import structlog
 
 from src.db import get_pool
+from src.errors import safe_error
 
 log = structlog.get_logger()
 
@@ -27,7 +28,7 @@ async def check_all() -> int:
                 results.append((p["id"], r.status_code, ms, r.status_code < 400, ""))
             except Exception as exc:  # noqa: BLE001
                 ms = int((time.monotonic() - t0) * 1000)
-                results.append((p["id"], None, ms, False, str(exc)[:300]))
+                results.append((p["id"], None, ms, False, safe_error(exc, 300)))
     if results:
         await pool.executemany(
             """

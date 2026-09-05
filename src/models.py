@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 Stage = Literal["idea", "building", "live", "scaling", "paused", "retired"]
 Health = Literal["unknown", "healthy", "watch", "critical"]
@@ -219,6 +219,8 @@ class IntegrationOut(BaseModel):
 
 
 class EventIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=64)
     user_key: str | None = None
     ts: datetime | None = None
@@ -231,7 +233,7 @@ class EventsRequest(BaseModel):
 
 class CostCreate(BaseModel):
     category: CostCategory = "other"
-    amount: float
+    amount: float = Field(ge=0)
     period_start: date
     period_end: date
     note: str = ""
@@ -239,7 +241,7 @@ class CostCreate(BaseModel):
 
 class CostUpdate(BaseModel):
     category: CostCategory | None = None
-    amount: float | None = None
+    amount: float | None = Field(default=None, ge=0)
     period_start: date | None = None
     period_end: date | None = None
     note: str | None = None
@@ -261,10 +263,10 @@ class AdSpendIn(BaseModel):
     platform: AdPlatform = "other"
     campaign_id: UUID | None = None
     day: date
-    spend: float = 0
-    impressions: int = 0
-    clicks: int = 0
-    conversions: int = 0
+    spend: float = Field(default=0, ge=0)
+    impressions: int = Field(default=0, ge=0)
+    clicks: int = Field(default=0, ge=0)
+    conversions: int = Field(default=0, ge=0)
 
 
 class AdSpendOut(BaseModel):

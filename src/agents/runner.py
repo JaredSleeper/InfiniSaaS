@@ -14,6 +14,7 @@ from src.api.finance import finance_summary
 from src.api.ops import uptime_summary
 from src.api.wiki import wiki_markdown
 from src.db import get_pool
+from src.errors import safe_error
 from src.integrations import slack
 from src.services.metrics import series, window_sum
 
@@ -315,7 +316,7 @@ async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
             "UPDATE agent_runs SET status = 'failed', finished_at = now(), error = $2"
             " WHERE id = $1",
             run_id,
-            str(exc)[:2000],
+            safe_error(exc, 2000),
         )
     return run_id
 

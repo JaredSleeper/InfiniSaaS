@@ -16,7 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 static_dir = BASE_DIR / "static"
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
-ASSET_VERSION = "3"
+ASSET_VERSION = "4"
 
 
 def _static_mount(app) -> None:

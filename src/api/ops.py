@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from src.api.projects import require_project
 from src.db import get_pool
+from src.errors import safe_error
 from src.integrations import railway, registry, uptime
 
 router = APIRouter()
@@ -71,7 +72,7 @@ async def ops(project_id: UUID, days: int = Query(default=7, ge=1, le=30)) -> di
             token = await registry.get_secret("railway", project_id)
             result["railway"] = await railway.fetch_project(integ["config"]["project_id"], token)
         except Exception as exc:  # noqa: BLE001
-            result["railway"] = {"error": str(exc)[:300]}
+            result["railway"] = {"error": safe_error(exc, 300)}
     return result
 
 
@@ -107,4 +108,4 @@ async def railway_status(project_id: UUID) -> dict:
     try:
         return await railway.fetch_project(integ["config"]["project_id"], token)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)[:300]) from exc
+        raise HTTPException(status_code=502, detail=safe_error(exc, 300)) from exc

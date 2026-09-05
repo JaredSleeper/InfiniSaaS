@@ -114,6 +114,8 @@ async def test_events_ingest_and_funnel(client, project):
 
 
 async def test_costs_ads_and_finance(client, project):
+    for row in (await client.get(f"/api/ad-spend?project_id={project['id']}")).json():
+        await client.delete(f"/api/ad-spend/{row['id']}")
     r = await client.post(
         f"/api/costs/projects/{project['id']}",
         json={
@@ -150,6 +152,15 @@ async def test_costs_ads_and_finance(client, project):
         },
     )
     assert r.status_code == 201
+    r = await client.post(
+        f"/api/costs/projects/{project['id']}",
+        json={"amount": -40, "period_start": "2026-09-01", "period_end": "2026-09-30"},
+    )
+    assert r.status_code == 422
+    r = await client.post(
+        f"/api/ad-spend/projects/{project['id']}", json={"day": "2026-09-03", "spend": -1}
+    )
+    assert r.status_code == 422
     fin = (await client.get(f"/api/finance?project_id={project['id']}")).json()
     assert fin["ad_spend"] == 60
     assert fin["cac"] == 10.0
@@ -200,6 +211,34 @@ async def test_integrations_registry_encrypts_secret(client, project):
     assert r.status_code == 400
     r = await client.put("/api/integrations/github", json={"project_id": project["id"]})
     assert r.status_code == 400  # missing repo config
+
+
+async def test_integration_error_never_echoes_secret(client, project, monkeypatch):
+    from src.integrations import slack
+
+    webhook = "https://hooks.slack.com/services/TSECRET/LEAK"
+
+    async def failing_verify(url: str) -> str:
+        req = httpx.Request("POST", url)
+        raise httpx.HTTPStatusError(
+            f"Redirect for url '{url}'", request=req, response=httpx.Response(302, request=req)
+        )
+
+    monkeypatch.setattr(slack, "verify", failing_verify)
+    r = await client.put(
+        "/api/integrations/slack", json={"project_id": project["id"], "secret": webhook}
+    )
+    assert r.status_code in (200, 201), r.text
+    row_id = r.json()["id"]
+    r = await client.post(f"/api/integrations/{row_id}/verify")
+    assert r.status_code == 502
+    assert "TSECRET" not in r.text
+    listed = (await client.get("/api/integrations")).json()
+    row = next(i for i in listed if i["id"] == row_id)
+    assert row["status"] == "error"
+    assert "TSECRET" not in row["status_detail"]
+    assert "HTTP 302" in row["status_detail"]
+    await client.delete(f"/api/integrations/{row_id}")
 
 
 async def test_agents_bootstrap_and_mock_run(client, project):

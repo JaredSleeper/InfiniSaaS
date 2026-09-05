@@ -146,7 +146,8 @@ async def evaluate_alerts() -> list[dict]:
                 else None
             )
             if age is None or age > threshold:
-                msg = f"{r['metric_name']} has no new data for {age or '∞'} days"
+                since = "∞" if age is None else f"{age:.1f}"
+                msg = f"{r['metric_name']} has no new data for {since} days"
         if msg:
             text = f":rotating_light: {r['project_name']}: {msg}"
             fired.append({"project_id": str(r["project_id"]), "text": text})

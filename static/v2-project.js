@@ -340,7 +340,7 @@ window.V2 = window.V2 || { tabs: {} };
           <div class="card">
             <div class="card-row"><strong>Search Console clicks (90d)</strong>
               ${clicks ? "" : `<a class="btn btn-sm" href="#/settings">Connect GSC</a>`}</div>
-            ${clickPts.length ? bigChart(clickPts, p.accent_color, "counter", "clicks") : `<div class="muted" style="font-size:12px; margin-top:6px">Connect Google Search Console in Settings to pull clicks, impressions, CTR and position per query.</div>`}
+            ${clickPts.length ? bigChart(clickPts, p.accent_color, "counter", "clicks", "Chart appears once there are 2+ days of Search Console data.") : `<div class="muted" style="font-size:12px; margin-top:6px">Connect Google Search Console in Settings to pull clicks, impressions, CTR and position per query.</div>`}
           </div>
           <div class="section-head" style="margin-top:20px"><h2>Keywords <span class="muted">(${kws.length})</span></h2>
             <button class="btn btn-sm" id="add-kw">+ Keyword</button></div>
@@ -413,7 +413,7 @@ window.V2 = window.V2 || { tabs: {} };
           </div>
           <div class="card">
             <strong>Daily active users</strong>
-            ${a.dau.length ? bigChart(a.dau, p.accent_color, "counter", "users") : `<div class="muted" style="font-size:12px">Send <code>user_key</code> with events to get DAU.</div>`}
+            ${a.dau.length ? bigChart(a.dau, p.accent_color, "counter", "users", "DAU chart appears once there are events on 2+ days.") : `<div class="muted" style="font-size:12px">Send <code>user_key</code> with events to get DAU.</div>`}
           </div>
         </div>
         <div class="grid-2" style="margin-top:16px">
@@ -421,7 +421,7 @@ window.V2 = window.V2 || { tabs: {} };
             <thead><tr><th>Event</th><th>Count</th><th>Users</th></tr></thead>
             <tbody>${a.events.map((e) => `<tr><td class="mono">${esc(e.name)}</td><td class="mono">${num(e.count)}</td><td class="mono">${num(e.users)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">—</td></tr>`}</tbody></table></div>
           <div class="card" style="padding:0; max-height:360px; overflow:auto"><table>
-            <thead><tr><th>Recent</th><th>User</th><th>Props</th></tr></thead>
+            <thead><tr><th>Recent</th><th>User</th><th>properties</th></tr></thead>
             <tbody>${recent.map((e) => `<tr><td><span class="mono">${esc(e.name)}</span><div class="muted" style="font-size:11px">${fmtDate(e.ts)}</div></td>
               <td class="mono" style="font-size:11px">${esc(e.user_key || "")}</td>
               <td class="mono" style="font-size:11px">${esc(JSON.stringify(e.properties || {}))}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">—</td></tr>`}</tbody></table></div>
@@ -449,7 +449,7 @@ window.V2 = window.V2 || { tabs: {} };
       <h2>${existing ? "Edit" : "Add"} cost</h2>
       <form>
         <div class="grid-2"><div><label>Category</label><select name="category">${options(COST_CATS, c.category)}</select></div>
-          <div><label>Amount ($)</label><input name="amount" type="number" step="0.01" value="${c.amount}" required></div></div>
+          <div><label>Amount ($)</label><input name="amount" type="number" step="0.01" min="0" value="${c.amount}" required></div></div>
         <div class="grid-2"><div><label>Period start</label><input name="period_start" type="date" value="${c.period_start}" required></div>
           <div><label>Period end</label><input name="period_end" type="date" value="${c.period_end}" required></div></div>
         <label>Note</label><input name="note" value="${esc(c.note)}" placeholder="Railway, Anthropic, domain…">
@@ -469,10 +469,10 @@ window.V2 = window.V2 || { tabs: {} };
       <form>
         <div class="grid-2"><div><label>Platform</label><select name="platform">${options(AD_PLATFORMS, "google")}</select></div>
           <div><label>Day</label><input name="day" type="date" value="${today()}" required></div></div>
-        <div class="grid-2"><div><label>Spend ($)</label><input name="spend" type="number" step="0.01" required></div>
-          <div><label>Conversions</label><input name="conversions" type="number" value="0"></div></div>
-        <div class="grid-2"><div><label>Impressions</label><input name="impressions" type="number" value="0"></div>
-          <div><label>Clicks</label><input name="clicks" type="number" value="0"></div></div>
+        <div class="grid-2"><div><label>Spend ($)</label><input name="spend" type="number" step="0.01" min="0" required></div>
+          <div><label>Conversions</label><input name="conversions" type="number" min="0" value="0"></div></div>
+        <div class="grid-2"><div><label>Impressions</label><input name="impressions" type="number" min="0" value="0"></div>
+          <div><label>Clicks</label><input name="clicks" type="number" min="0" value="0"></div></div>
         <label>Campaign</label><select name="campaign_id"><option value="">—</option>
           ${camps.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select>
         ${actionsRow()}
@@ -513,7 +513,7 @@ window.V2 = window.V2 || { tabs: {} };
         </div>
         <div class="grid-2">
           <div class="card"><strong>Revenue</strong> <span class="muted" style="font-size:12px">${stripe ? "from Stripe" : "manual / ingest — connect Stripe to automate"}</span>
-            ${revPts.length ? bigChart(revPts, "var(--good)", "currency", "$") : `<div class="muted" style="font-size:12px; margin-top:6px">No revenue points in this window.</div>`}</div>
+            ${revPts.length ? bigChart(revPts, "var(--good)", "currency", "$", "Chart appears once there are 2+ revenue points in this window.") : `<div class="muted" style="font-size:12px; margin-top:6px">No revenue points in this window.</div>`}</div>
           <div class="card"><strong>Costs by category</strong> <span class="muted" style="font-size:12px">${days}d</span>
             <table style="margin-top:8px"><tbody>
               ${Object.entries(f.costs_by_category).map(([k, v]) => `<tr><td>${badge(k)}</td><td class="mono" style="text-align:right">${money(v)}</td></tr>`).join("")}

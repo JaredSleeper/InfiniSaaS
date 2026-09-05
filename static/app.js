@@ -72,10 +72,10 @@ function sparkline(points, color, w = 160, h = 36) {
     <polyline points="${pts}" stroke="${esc(color)}"/></svg>`;
 }
 
-function bigChart(points, color, kind, unit) {
+function bigChart(points, color, kind, unit, emptyMsg = "Not enough datapoints to chart yet — add a few below.") {
   const w = 560, h = 140;
   if (!points || points.length < 2) {
-    return `<div class="empty">Not enough datapoints to chart yet — add a few below.</div>`;
+    return `<div class="empty">${emptyMsg}</div>`;
   }
   const vals = points.map((p) => p.value);
   const min = Math.min(...vals);

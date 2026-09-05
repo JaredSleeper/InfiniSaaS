@@ -8,6 +8,7 @@ from src.api.projects import require_project
 from src.api.wiki import wiki_markdown
 from src.config import settings
 from src.db import get_pool
+from src.errors import safe_error
 from src.integrations import devin
 from src.models import DevinMessage, DevinPromptPreview, DevinSessionCreate, DevinSessionOut
 
@@ -124,7 +125,7 @@ async def create_session(body: DevinSessionCreate) -> DevinSessionOut:
     try:
         created = await devin.create_session(built.prompt, built.title, tags)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)[:500]) from exc
+        raise HTTPException(status_code=502, detail=safe_error(exc)) from exc
     pool = await get_pool()
     row = await pool.fetchrow(
         """
@@ -177,7 +178,7 @@ async def refresh(row_id: UUID) -> DevinSessionOut:
     try:
         remote = await devin.get_session(row["session_id"])
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)[:500]) from exc
+        raise HTTPException(status_code=502, detail=safe_error(exc)) from exc
     pool = await get_pool()
     updated = await pool.fetchrow(
         """
@@ -200,7 +201,7 @@ async def message(row_id: UUID, body: DevinMessage) -> dict:
     try:
         await devin.send_message(row["session_id"], body.message)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=502, detail=str(exc)[:500]) from exc
+        raise HTTPException(status_code=502, detail=safe_error(exc)) from exc
     return {"sent": True}
 
 
