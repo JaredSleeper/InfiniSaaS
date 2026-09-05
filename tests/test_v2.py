@@ -301,3 +301,18 @@ async def test_project_patch_repo_and_settings(client, project):
     assert r.json()["settings"]["funnel"] == ["visit", "play", "pay"]
     summary = (await client.get(f"/api/analytics?project_id={project['id']}")).json()
     assert summary["funnel_steps"] == ["visit", "play", "pay"]
+
+
+async def test_scheduler_leadership_is_exclusive(client):
+    from src import scheduler
+    from src.db import get_pool
+
+    leader = await scheduler._acquire_leadership()
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as other:
+            got = await other.fetchval("SELECT pg_try_advisory_lock($1)", scheduler.LEADER_LOCK_ID)
+            assert got is False
+    finally:
+        await leader.execute("SELECT pg_advisory_unlock($1)", scheduler.LEADER_LOCK_ID)
+        await (await get_pool()).release(leader)

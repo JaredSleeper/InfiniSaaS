@@ -6,16 +6,21 @@ import asyncio
 import contextlib
 from datetime import UTC, datetime
 
+import asyncpg
 import structlog
 
 from src.agents import runner
 from src.api import devin, integrations, targets
 from src.config import settings
+from src.db import get_pool
 from src.integrations import uptime
 
 log = structlog.get_logger()
 _task: asyncio.Task | None = None
 _last_hourly: datetime | None = None
+
+# Session-level advisory lock so exactly one uvicorn worker (or Railway replica) runs the loop.
+LEADER_LOCK_ID = 815503
 
 
 async def tick() -> dict:
@@ -41,12 +46,29 @@ async def tick() -> dict:
     return results
 
 
+async def _acquire_leadership() -> asyncpg.Connection:
+    pool = await get_pool()
+    while True:
+        conn = await pool.acquire()
+        if await conn.fetchval("SELECT pg_try_advisory_lock($1)", LEADER_LOCK_ID):
+            return conn
+        await pool.release(conn)
+        await asyncio.sleep(settings.scheduler_interval_seconds)
+
+
 async def _loop() -> None:
     await asyncio.sleep(10)
-    while True:
-        res = await tick()
-        log.info("scheduler_tick", **{k: str(v)[:80] for k, v in res.items()})
-        await asyncio.sleep(settings.scheduler_interval_seconds)
+    leader = await _acquire_leadership()
+    log.info("scheduler_leader_acquired")
+    try:
+        while True:
+            res = await tick()
+            log.info("scheduler_tick", **{k: str(v)[:80] for k, v in res.items()})
+            await asyncio.sleep(settings.scheduler_interval_seconds)
+    finally:
+        with contextlib.suppress(Exception):
+            await leader.execute("SELECT pg_advisory_unlock($1)", LEADER_LOCK_ID)
+            await (await get_pool()).release(leader)
 
 
 def start() -> None:
