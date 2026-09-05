@@ -47,6 +47,30 @@ async def _source_context(source_type: str, source_id: UUID | None) -> tuple[str
                 f"## Experiment: {r['name']}\nChannel: {r['channel']} · Status: {r['status']}\n\n"
                 f"Hypothesis: {r['hypothesis']}"
             )
+    elif source_type == "landing_page":
+        r = await pool.fetchrow("SELECT * FROM landing_pages WHERE id = $1", source_id)
+        if r:
+            facts = [f"Path: `{r['path']}`"]
+            if r["url"]:
+                facts.append(f"URL: {r['url']}")
+            facts += [f"Channel: {r['channel']}", f"Status: {r['status']}"]
+            if r["target_keyword"]:
+                facts.append(f"Target keyword: {r['target_keyword']}")
+            if r["headline"]:
+                facts.append(f"Headline: {r['headline']}")
+            if r["angle"]:
+                facts.append(f"Angle: {r['angle']}")
+            md = f"## Landing page: {r['name']}\n" + "\n".join(facts)
+            if r["brief"]:
+                md += f"\n\n### Brief\n{r['brief']}"
+            if r["notes"]:
+                md += f"\n\n### Notes\n{r['notes']}"
+            md += (
+                "\n\nInstrument the page so the cockpit can measure it: fire the project's "
+                f'`visit` event with `properties.path = "{r["path"]}"` on load, and keep '
+                "signup/pay events tagged with the same user_key."
+            )
+            return r["name"], md
     return "", ""
 
 

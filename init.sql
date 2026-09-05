@@ -388,3 +388,47 @@ CROSS JOIN (VALUES
     ('ops',         'Accounts & ops',         70, E'## Accounts of record (no secrets here)\n\n## Runbooks\n')
 ) AS w(slug, title, sort_order, content)
 ON CONFLICT (project_id, slug) DO NOTHING;
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- v2.1: landing pages — registry + cross-project performance + agent loop.
+-- ────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS landing_pages (
+    id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id     uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name           text NOT NULL,
+    path           text NOT NULL,
+    url            text,
+    headline       text NOT NULL DEFAULT '',
+    angle          text NOT NULL DEFAULT '',
+    target_keyword text NOT NULL DEFAULT '',
+    channel        text NOT NULL DEFAULT 'seo'
+                   CHECK (channel IN ('seo', 'paid', 'social', 'content', 'email',
+                                      'community', 'product', 'pricing', 'other')),
+    status         text NOT NULL DEFAULT 'idea'
+                   CHECK (status IN ('idea', 'draft', 'live', 'retired')),
+    brief          text NOT NULL DEFAULT '',
+    notes          text NOT NULL DEFAULT '',
+    campaign_id    uuid REFERENCES campaigns(id) ON DELETE SET NULL,
+    experiment_id  uuid REFERENCES experiments(id) ON DELETE SET NULL,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, path)
+);
+CREATE INDEX IF NOT EXISTS landing_pages_project_status_idx ON landing_pages (project_id, status);
+
+ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS data jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE recommendations ADD COLUMN IF NOT EXISTS landing_page_id uuid
+    REFERENCES landing_pages(id) ON DELETE SET NULL;
+ALTER TABLE recommendations DROP CONSTRAINT IF EXISTS recommendations_kind_check;
+ALTER TABLE recommendations ADD CONSTRAINT recommendations_kind_check
+    CHECK (kind IN ('experiment', 'task', 'content', 'alert', 'insight', 'landing_page'));
+
+ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_kind_check;
+ALTER TABLE agents ADD CONSTRAINT agents_kind_check
+    CHECK (kind IN ('weekly_brief', 'seo', 'ads', 'analytics', 'landing_pages', 'custom'));
+
+ALTER TABLE devin_sessions DROP CONSTRAINT IF EXISTS devin_sessions_source_type_check;
+ALTER TABLE devin_sessions ADD CONSTRAINT devin_sessions_source_type_check
+    CHECK (source_type IN ('manual', 'feature_request', 'recommendation', 'experiment',
+                           'landing_page'));

@@ -252,6 +252,9 @@ code { font-family: var(--font-mono); font-size: 12px; background: var(--bg); pa
 .badge.shipped, .badge.published, .badge.done, .badge.ok, .badge.succeeded, .badge.up { color: var(--good); border-color: var(--good); }
 .badge.building, .badge.drafting, .badge.scheduled, .badge.considering, .badge.medium { color: var(--warn); border-color: var(--warn); }
 .badge.declined, .badge.dismissed, .badge.failed, .badge.down { color: var(--bad); border-color: var(--bad); }
+.badge.landing_page { color: var(--devin); border-color: var(--devin); }
+.badge.draft { color: var(--warn); border-color: var(--warn); }
+.badge.retired { opacity: 0.6; text-decoration: line-through; }
 
 #user-button { display: flex; align-items: center; min-width: 0; }
 .topbar .btn-devin { white-space: nowrap; }

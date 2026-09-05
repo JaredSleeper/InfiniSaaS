@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Literal
+from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Stage = Literal["idea", "building", "live", "scaling", "paused", "retired"]
 Health = Literal["unknown", "healthy", "watch", "critical"]
@@ -180,12 +181,13 @@ CostCategory = Literal["infra", "ads", "tools", "llm", "contractors", "other"]
 AdPlatform = Literal["google", "meta", "reddit", "x", "tiktok", "linkedin", "other"]
 AlertCondition = Literal["below", "above", "drop_pct", "stale_days"]
 Provider = Literal["stripe", "github", "railway", "gsc", "slack", "custom"]
-AgentKind = Literal["weekly_brief", "seo", "ads", "analytics", "custom"]
+AgentKind = Literal["weekly_brief", "seo", "ads", "analytics", "landing_pages", "custom"]
 AgentSchedule = Literal["manual", "daily", "weekly"]
-RecKind = Literal["experiment", "task", "content", "alert", "insight"]
+RecKind = Literal["experiment", "task", "content", "alert", "insight", "landing_page"]
 RecStatus = Literal["open", "accepted", "dismissed", "done"]
 Level = Literal["low", "medium", "high"]
-DevinSource = Literal["manual", "feature_request", "recommendation", "experiment"]
+DevinSource = Literal["manual", "feature_request", "recommendation", "experiment", "landing_page"]
+LandingPageStatus = Literal["idea", "draft", "live", "retired"]
 
 
 class ProjectUpdateV2(ProjectUpdate):
@@ -581,5 +583,147 @@ class RecommendationOut(BaseModel):
     status: RecStatus
     experiment_id: UUID | None
     devin_session_id: UUID | None
+    landing_page_id: UUID | None = None
+    data: dict = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+
+
+# ── Landing pages ────────────────────────────────────────────────────────────
+
+
+def _normalize_path(value: str) -> str:
+    value = value.strip()
+    if value.startswith(("http://", "https://")):
+        parsed = urlparse(value)
+        value = parsed.path or "/"
+    if not value.startswith("/"):
+        value = "/" + value
+    if len(value) > 1:
+        value = value.rstrip("/")
+    if any(c.isspace() for c in value):
+        raise ValueError("path must not contain whitespace")
+    return value
+
+
+class LandingPageCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    path: str = Field(min_length=1, max_length=400)
+    url: str | None = Field(default=None, max_length=800)
+    headline: str = Field(default="", max_length=300)
+    angle: str = ""
+    target_keyword: str = Field(default="", max_length=200)
+    channel: Channel = "seo"
+    status: LandingPageStatus = "idea"
+    brief: str = ""
+    notes: str = ""
+    campaign_id: UUID | None = None
+    experiment_id: UUID | None = None
+
+    @field_validator("path")
+    @classmethod
+    def _path(cls, v: str) -> str:
+        return _normalize_path(v)
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        v = v.strip()
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("url must start with http:// or https://")
+        return v
+
+
+class LandingPageUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    path: str | None = Field(default=None, min_length=1, max_length=400)
+    url: str | None = Field(default=None, max_length=800)
+    headline: str | None = Field(default=None, max_length=300)
+    angle: str | None = None
+    target_keyword: str | None = Field(default=None, max_length=200)
+    channel: Channel | None = None
+    status: LandingPageStatus | None = None
+    brief: str | None = None
+    notes: str | None = None
+    campaign_id: UUID | None = None
+    experiment_id: UUID | None = None
+
+    @field_validator("path")
+    @classmethod
+    def _path(cls, v: str | None) -> str | None:
+        return None if v is None else _normalize_path(v)
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if v and not v.startswith(("http://", "https://")):
+            raise ValueError("url must start with http:// or https://")
+        return v or None
+
+
+class LandingPageOut(BaseModel):
+    id: UUID
+    project_id: UUID
+    name: str
+    path: str
+    url: str | None
+    headline: str
+    angle: str
+    target_keyword: str
+    channel: Channel
+    status: LandingPageStatus
+    brief: str
+    notes: str
+    campaign_id: UUID | None
+    experiment_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LandingPagePerf(BaseModel):
+    """One row of the cross-project comparison table."""
+
+    page: LandingPageOut
+    project_name: str
+    project_slug: str
+    accent_color: str
+    days: int
+    pageviews: int
+    visitors: int
+    signups: int
+    pays: int
+    signup_rate: float | None
+    pay_rate: float | None
+    gsc_clicks: int | None
+    gsc_impressions: int | None
+    gsc_ctr: float | None
+    gsc_position: float | None
+    gsc_keywords: int
+    ad_spend: float | None
+    ad_clicks: int | None
+    ad_conversions: int | None
+    cpa: float | None
+    seo_score: int | None
+    seo_audit_at: datetime | None
+    campaign_name: str | None
+
+
+class DiscoveredPath(BaseModel):
+    """A `path` seen in visit events that has no landing_pages row yet."""
+
+    project_id: UUID
+    project_name: str
+    path: str
+    pageviews: int
+    visitors: int
+
+
+class LandingPerformance(BaseModel):
+    days: int
+    pages: list[LandingPagePerf]
+    discovered: list[DiscoveredPath]

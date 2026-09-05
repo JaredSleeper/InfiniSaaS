@@ -11,6 +11,7 @@ import structlog
 from src.agents import llm, seo_audit
 from src.api.events import analytics_summary
 from src.api.finance import finance_summary
+from src.api.landing import landing_performance
 from src.api.ops import uptime_summary
 from src.api.wiki import wiki_markdown
 from src.db import get_pool
@@ -29,14 +30,29 @@ Respond with ONLY a JSON object:
   "summary": "<3-6 sentence brief in markdown; lead with what changed and why it matters>",
   "recommendations": [
     {"title": "<imperative, <=90 chars>", "body": "<what/why/how, markdown, <=600 chars>",
-     "kind": "experiment|task|content|alert|insight",
-     "impact": "low|medium|high", "effort": "low|medium|high"}
+     "kind": "experiment|task|content|alert|insight|landing_page",
+     "impact": "low|medium|high", "effort": "low|medium|high",
+     "page": {"path": "/route", "headline": "...", "angle": "...",
+              "target_keyword": "...", "channel": "seo|paid|social|content|email|other"}}
   ]
 }
+"page" is only for kind "landing_page" (a new page to build or an existing page to rewrite).
 Rules: max 6 recommendations, no duplicates of open recommendations listed in the context,
 prefer experiments with a measurable metric, cite numbers from the context, never invent data."""
 
-_VALID_KIND = {"experiment", "task", "content", "alert", "insight"}
+_VALID_KIND = {"experiment", "task", "content", "alert", "insight", "landing_page"}
+_VALID_CHANNEL = {
+    "seo",
+    "paid",
+    "social",
+    "content",
+    "email",
+    "community",
+    "product",
+    "pricing",
+    "other",
+}
+_PAGE_FIELDS = ("path", "headline", "angle", "target_keyword", "channel")
 _VALID_LEVEL = {"low", "medium", "high"}
 
 
@@ -212,6 +228,62 @@ async def _ads_context(project_id: UUID) -> dict:
     }
 
 
+async def _landing_context(project_id: UUID) -> dict:
+    perf = await landing_performance(project_id, 30)
+    pool = await get_pool()
+    keywords = await pool.fetch(
+        """SELECT keyword, target_url, position, clicks, impressions, ctr
+           FROM seo_keywords WHERE project_id = $1
+           ORDER BY impressions DESC NULLS LAST, clicks DESC NULLS LAST LIMIT 40""",
+        project_id,
+    )
+    pages = []
+    for row in perf.pages:
+        page = row.page
+        pages.append(
+            {
+                "name": page.name,
+                "path": page.path,
+                "url": page.url,
+                "status": page.status,
+                "channel": page.channel,
+                "headline": page.headline,
+                "angle": page.angle,
+                "target_keyword": page.target_keyword,
+                "campaign": row.campaign_name,
+                "pageviews_30d": row.pageviews,
+                "visitors_30d": row.visitors,
+                "signups_30d": row.signups,
+                "pays_30d": row.pays,
+                "signup_rate_pct": row.signup_rate,
+                "pay_rate_pct": row.pay_rate,
+                "gsc_clicks": row.gsc_clicks,
+                "gsc_impressions": row.gsc_impressions,
+                "gsc_ctr_pct": row.gsc_ctr,
+                "gsc_best_position": row.gsc_position,
+                "ad_spend_30d": row.ad_spend,
+                "cpa": row.cpa,
+                "seo_score": row.seo_score,
+            }
+        )
+    return {
+        "window_days": perf.days,
+        "pages": pages,
+        "unregistered_paths_with_traffic": [
+            {"path": d.path, "pageviews": d.pageviews, "visitors": d.visitors}
+            for d in perf.discovered
+        ],
+        "keywords": [
+            dict(r)
+            | {
+                "position": float(r["position"]) if r["position"] is not None else None,
+                "ctr": float(r["ctr"]) if r["ctr"] is not None else None,
+            }
+            for r in keywords
+        ],
+    }
+
+
 async def build_context(agent: dict) -> dict:
     kind, project_id, config = agent["kind"], agent["project_id"], agent["config"] or {}
     ctx: dict = {
@@ -233,6 +305,10 @@ async def build_context(agent: dict) -> dict:
     elif kind == "analytics":
         ctx["analytics"] = await analytics_summary(project_id, 30)
         ctx["analytics"].pop("series", None)
+    elif kind == "landing_pages":
+        ctx["landing_pages"] = await _landing_context(project_id)
+        ctx["analytics"] = await analytics_summary(project_id, 30)
+        ctx["analytics"].pop("series", None)
     return ctx
 
 
@@ -245,6 +321,14 @@ def _prompt_for(agent: dict, ctx: dict) -> str:
         "recommend budget shifts, new platforms/tests, or pausing what doesn't work.",
         "analytics": "Act as a product analyst. Read the funnel and event data, find the biggest "
         "drop-off, and propose experiments to fix it.",
+        "landing_pages": "Act as a conversion + acquisition strategist for landing pages. Compare "
+        "the pages in context (visitors, signup/pay rates, Search Console clicks/CTR, paid CPA, "
+        "SEO score). Propose: new pages for underserved keywords or ICP segments from the wiki "
+        "(kind landing_page with a full page object: path, headline, angle, target_keyword, "
+        "channel), headline/angle tests on the best-trafficked pages (kind experiment), and "
+        "rewrites or retirement of pages that get traffic but don't convert. Paths with traffic "
+        "that aren't registered as landing pages are candidates to track. Be specific about "
+        "the promise each page makes and which metric proves it worked.",
         "custom": "Follow the agent instructions in the context.",
     }[agent["kind"]]
     instr = agent["instructions"].strip()
@@ -255,6 +339,14 @@ def _prompt_for(agent: dict, ctx: dict) -> str:
         + json.dumps(ctx, default=str)[:60000]
         + "\n```"
     )
+
+
+def _clean_page(page: dict) -> dict:
+    """Keep only the known page-brief fields, as bounded strings."""
+    out = {k: str(page[k])[:400] for k in _PAGE_FIELDS if page.get(k)}
+    if out.get("channel") not in _VALID_CHANNEL:
+        out.pop("channel", None)
+    return out
 
 
 async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
@@ -276,6 +368,8 @@ async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
         for r in parsed.get("recommendations", [])[:6]:
             if not isinstance(r, dict) or not r.get("title"):
                 continue
+            page = r.get("page")
+            data = {"page": _clean_page(page)} if isinstance(page, dict) else {}
             recs.append(
                 (
                     run_id,
@@ -286,13 +380,14 @@ async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
                     r.get("kind") if r.get("kind") in _VALID_KIND else "task",
                     r.get("impact") if r.get("impact") in _VALID_LEVEL else "medium",
                     r.get("effort") if r.get("effort") in _VALID_LEVEL else "medium",
+                    data,
                 )
             )
         async with pool.acquire() as conn, conn.transaction():
             await conn.executemany(
                 """INSERT INTO recommendations
-                   (agent_run_id, agent_id, project_id, title, body, kind, impact, effort)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)""",
+                   (agent_run_id, agent_id, project_id, title, body, kind, impact, effort, data)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
                 recs,
             )
             await conn.execute(
