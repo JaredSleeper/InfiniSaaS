@@ -115,12 +115,27 @@ window.V2 = window.V2 || { tabs: {} };
     </div>`;
   }
 
-  V2.landingTable = function (perf, { showProject = false } = {}) {
+  /* Column labels follow the project's funnel (settings.funnel = [visit, signup, ..., pay]). */
+  function funnelLabels(project) {
+    const steps = (project && project.settings && project.settings.funnel) || [];
+    const signup = steps[1] || "signup", pay = steps[steps.length - 1] || "pay";
+    return {
+      signup: signup === "signup" ? "Signups" : esc(signup),
+      pay: pay === "pay" ? "Pays" : esc(pay),
+      hint: `First-touch visitors to this path who later fired the project's funnel step (${esc(signup)} / ${esc(pay)}). Change under Analytics → Funnel steps.`,
+    };
+  }
+
+  V2.landingTable = function (perf, { showProject = false, project = null } = {}) {
     if (!perf.pages.length) return "";
+    const f = funnelLabels(project);
+    const hint = project ? f.hint : "First-touch visitors who later fired the project's signup / pay funnel step (varies per project).";
     return `${leaders(perf.pages)}
       <div class="card" style="padding:0; overflow-x:auto"><table>
         <thead><tr><th>Page</th><th>Channel</th>
-          <th style="text-align:right">Visitors</th><th style="text-align:right">Signups</th><th style="text-align:right">Pays</th>
+          <th style="text-align:right" title="Unique users whose first visit event (in the window) was on this path">Visitors</th>
+          <th style="text-align:right" title="${hint}">${f.signup}</th>
+          <th style="text-align:right" title="${hint}">${f.pay}</th>
           <th style="text-align:right">Search clicks</th><th style="text-align:right">Ad spend</th><th style="text-align:right">SEO</th><th></th></tr></thead>
         <tbody>${perf.pages.map((r) => pageRow(r, showProject)).join("")}</tbody></table></div>`;
   };
@@ -224,7 +239,8 @@ window.V2 = window.V2 || { tabs: {} };
           <span>${daysSeg(days)}
             ${agent ? `<button class="btn btn-sm" id="run-lp-agent">Run landing page agent</button>` : `<button class="btn btn-sm" id="add-lp-agent">Add landing page agent</button>`}
             <button class="btn btn-sm btn-primary" id="add-lp">+ Landing page</button></span></div>
-        ${V2.landingTable(perf) || `<div class="empty">No landing pages for ${esc(p.name)} yet.<br><span class="muted" style="font-size:12px">Register the pages you already have (path = what you send as <code>properties.path</code> on <code>visit</code> events), then let the agent suggest new ones.</span></div>`}
+        <div id="lp-agent-status"></div>
+        ${V2.landingTable(perf, { project: p }) || `<div class="empty">No landing pages for ${esc(p.name)} yet.<br><span class="muted" style="font-size:12px">Register the pages you already have (path = what you send as <code>properties.path</code> on <code>visit</code> events), then let the agent suggest new ones.</span></div>`}
         ${discoveredList(perf, false)}
         <div class="section-head" style="margin-top:24px"><h3>Page suggestions <span class="muted">(${lpRecs.length} open)</span></h3></div>
         <div class="grid-2">${lpRecs.map((r) => V2.recCard(r)).join("") || `<div class="muted" style="font-size:12px">Nothing open. ${agent ? "Run the landing page agent for suggestions grounded in the wiki, keywords and this table." : "Add the landing page agent to get suggestions."}</div>`}</div>
@@ -233,9 +249,17 @@ window.V2 = window.V2 || { tabs: {} };
     root.querySelectorAll("[data-days]").forEach((b) => b.addEventListener("click", () => { location.hash = `#/p/${id}/landing/${b.dataset.days}`; }));
     const run = document.getElementById("run-lp-agent");
     if (run) run.addEventListener("click", async () => {
+      const status = document.getElementById("lp-agent-status");
       run.textContent = "Running…"; run.disabled = true;
-      try { await api(`/api/agents/${agent.id}/run`, { method: "POST" }); } catch (ex) { alert(ex.message); }
-      rerender();
+      status.innerHTML = `<div class="notice">Landing page agent is reading the wiki, keywords and this table… usually 20–60s.</div>`;
+      let result;
+      try { result = await api(`/api/agents/${agent.id}/run`, { method: "POST" }); }
+      catch (ex) { status.innerHTML = `<div class="notice">Run failed: ${esc(ex.message)}</div>`; run.textContent = "Run landing page agent"; run.disabled = false; return; }
+      const after = await api(`/api/recommendations?project_id=${id}&status=open`);
+      const fresh = after.filter((r) => r.kind === "landing_page").length - lpRecs.length;
+      await rerender();
+      const s = document.getElementById("lp-agent-status");
+      if (s) s.innerHTML = `<div class="notice">Run ${esc(result.status)}${result.error ? ` — ${esc(result.error)}` : ""}: ${fresh > 0 ? `<b>${fresh} new page suggestion${fresh === 1 ? "" : "s"}</b> below` : "no new page suggestions"}${result.summary ? ` — ${esc(result.summary.replace(/\.$/, ""))}` : ""}. <a href="#/p/${id}/agents">Run history →</a></div>`;
     });
     const add = document.getElementById("add-lp-agent");
     if (add) add.addEventListener("click", async () => {
