@@ -12,11 +12,18 @@ const CAMP_STATUSES = ["planned", "active", "paused", "done"];
 
 /* ── helpers ── */
 
+/* Set by boot.js when Clerk is active; returns a bearer token or null. */
+window.__getAuthToken = window.__getAuthToken || (async () => null);
+
 async function api(path, opts = {}) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
+  const headers = { "Content-Type": "application/json" };
+  const token = await window.__getAuthToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(path, { headers, ...opts });
+  if (res.status === 401 && window.INFINI && window.INFINI.authEnabled && window.__signIn) {
+    window.__signIn();
+    throw new Error("Sign in required");
+  }
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch { /* noop */ }
@@ -118,6 +125,7 @@ function openModal(html, onSubmit) {
 function closeModal() {
   $backdrop.classList.add("hidden");
   $modal.innerHTML = "";
+  $modal.classList.remove("modal-wide");
 }
 
 $backdrop.addEventListener("click", (e) => { if (e.target === $backdrop) closeModal(); });
@@ -137,6 +145,7 @@ async function renderCockpit() {
       <div class="stat"><div class="num">${c.total_learnings}</div><div class="lbl">Learnings logged</div></div>
     </div>
     <div id="strips"></div>
+    <div id="cockpit-v2"></div>
     <div class="grid-2 section">
       <div>
         <div class="section-head"><h2>Active experiments</h2><a href="#/experiments">all →</a></div>
@@ -189,17 +198,21 @@ async function renderCockpit() {
       <div class="muted" style="font-size:12px; margin-top:4px">
         ${l.project_name ? `<span style="color:${esc(l.project_accent)}">●</span> ${esc(l.project_name)} · ` : ""}${fmtDate(l.created_at)}</div>
     </div>`).join("") || `<div class="empty">No learnings logged yet.</div>`;
+
+  await V2.cockpitExtras(document.getElementById("cockpit-v2"), data.projects);
 }
 
 /* ── project detail ── */
 
-async function renderProject(id) {
-  const [p, metricsList, exps, camps] = await Promise.all([
-    api(`/api/projects/${id}`),
-    api(`/api/projects/${id}/metrics`),
-    api(`/api/experiments?project_id=${id}`),
-    api(`/api/campaigns?project_id=${id}`),
-  ]);
+const PROJECT_TABS = [
+  ["overview", "Overview"], ["wiki", "Wiki"], ["product", "Product"], ["growth", "Growth"],
+  ["analytics", "Analytics"], ["finance", "Finance"], ["ops", "Ops"], ["agents", "Agents"],
+  ["devin", "Devin"],
+];
+
+async function renderProject(id, tab = "overview", sub) {
+  const p = await api(`/api/projects/${id}`);
+  window.__currentProject = p;
 
   $view.innerHTML = `
     <div class="page-head">
@@ -212,12 +225,36 @@ async function renderProject(id) {
         <div class="muted">${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.url)}</a> — ` : ""}${esc(p.description)}</div>
       </div>
       <div>
+        <button class="btn btn-devin" id="proj-devin">◆ Send to Devin</button>
         <button class="btn" id="edit-project">Edit</button>
         <button class="btn" id="show-token">Ingest token</button>
       </div>
     </div>
+    <nav class="tabs" id="proj-tabs">
+      ${PROJECT_TABS.map(([k, label]) =>
+        `<a href="#/p/${id}/${k}" class="${k === tab ? "active" : ""}">${label}</a>`).join("")}
+    </nav>
+    <div id="tab-body"></div>`;
 
-    <div class="section">
+  document.getElementById("proj-devin").addEventListener("click", () =>
+    V2.devinModal({ project_id: id }));
+  bindProjectHeader(id, p);
+  const body = document.getElementById("tab-body");
+  if (tab === "overview") await renderProjectOverview(id, p, body);
+  else if (V2.tabs[tab]) await V2.tabs[tab](id, p, body, sub);
+  else body.innerHTML = `<div class="empty">Unknown tab.</div>`;
+}
+
+async function renderProjectOverview(id, p, root) {
+  const [metricsList, exps, camps] = await Promise.all([
+    api(`/api/projects/${id}/metrics`),
+    api(`/api/experiments?project_id=${id}`),
+    api(`/api/campaigns?project_id=${id}`),
+  ]);
+  _expCache = exps;
+
+  root.innerHTML = `
+    <div class="section" style="margin-top:12px">
       <div class="section-head"><h2>Metrics</h2>
         <span><button class="btn btn-sm" id="add-metric">+ Metric</button></span></div>
       <div id="metric-select-row" style="margin-bottom:10px"></div>
@@ -301,12 +338,28 @@ async function renderProject(id) {
     });
   });
 
+  /* experiments + campaigns lists */
+  document.getElementById("proj-exps").innerHTML = exps.map(expCard).join("")
+    || `<div class="empty">No experiments yet. What's the next growth bet?</div>`;
+  bindExpCards(metricsList);
+  _campCache = camps;
+  document.getElementById("proj-camps").innerHTML = camps.map(campCard).join("")
+    || `<div class="empty">No campaigns yet.</div>`;
+  bindCampCards();
+
+  document.getElementById("add-exp").addEventListener("click", () => expModal(id, metricsList));
+  document.getElementById("add-camp").addEventListener("click", () => campModal(id));
+}
+
+function bindProjectHeader(id, p) {
   document.getElementById("show-token").addEventListener("click", async () => {
     const t = await api(`/api/projects/${id}/ingest-token`);
     openModal(`
       <h2>Ingest token</h2>
       <p class="muted">Push metrics from ${esc(p.name)} with:</p>
       <div class="token-box">POST /api/v1/metrics<br>Authorization: Bearer ${esc(t.ingest_token)}<br>{"points": [{"metric": "revenue", "value": 42}]}</div>
+      <p class="muted" style="margin-top:10px">Push product events (funnel) with the same token:</p>
+      <div class="token-box">POST /api/v1/events<br>{"events": [{"name": "signup", "user_key": "u_123", "properties": {"plan": "pro"}}]}</div>
       <div class="actions"><button class="btn" type="button" data-close>Close</button></div>`);
   });
 
@@ -316,6 +369,7 @@ async function renderProject(id) {
       <form>
         <label>Name</label><input name="name" value="${esc(p.name)}" required>
         <label>URL</label><input name="url" value="${esc(p.url || "")}">
+        <label>Repo URL</label><input name="repo_url" value="${esc(p.repo_url || "")}" placeholder="https://github.com/owner/repo">
         <label>Stage</label><select name="stage">${options(STAGES, p.stage)}</select>
         <label>Health</label><select name="health">${options(HEALTH, p.health)}</select>
         <label>Accent color</label><input name="accent_color" type="color" value="${esc(p.accent_color)}">
@@ -329,7 +383,8 @@ async function renderProject(id) {
       await api(`/api/projects/${id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          name: fd.get("name"), url: fd.get("url") || null, stage: fd.get("stage"),
+          name: fd.get("name"), url: fd.get("url") || null, repo_url: fd.get("repo_url") || null,
+          stage: fd.get("stage"),
           health: fd.get("health"), accent_color: fd.get("accent_color"),
           description: fd.get("description"),
         }),
@@ -342,18 +397,6 @@ async function renderProject(id) {
       location.hash = "#/";
     });
   });
-
-  /* experiments + campaigns lists */
-  document.getElementById("proj-exps").innerHTML = exps.map(expCard).join("")
-    || `<div class="empty">No experiments yet. What's the next growth bet?</div>`;
-  bindExpCards(metricsList);
-  _campCache = camps;
-  document.getElementById("proj-camps").innerHTML = camps.map(campCard).join("")
-    || `<div class="empty">No campaigns yet.</div>`;
-  bindCampCards();
-
-  document.getElementById("add-exp").addEventListener("click", () => expModal(id, metricsList));
-  document.getElementById("add-camp").addEventListener("click", () => campModal(id));
 }
 
 /* ── experiments ── */
@@ -604,9 +647,17 @@ async function render() {
   };
   try {
     if (hash.startsWith("#/p/")) {
-      const [expData] = await Promise.all([api(`/api/experiments?project_id=${hash.slice(4)}`)]);
-      _expCache = expData;
-      await renderProject(hash.slice(4));
+      const [pid, tab, sub] = hash.slice(4).split("/");
+      await renderProject(pid, tab || "overview", sub);
+    } else if (hash === "#/inbox") {
+      mark("inbox");
+      await V2.renderInbox();
+    } else if (hash === "#/devin") {
+      mark("devin");
+      await V2.renderDevin();
+    } else if (hash === "#/settings") {
+      mark("settings");
+      await V2.renderSettings();
     } else if (hash === "#/experiments") {
       mark("experiments");
       await renderExperiments();
@@ -627,4 +678,4 @@ async function render() {
 }
 
 window.addEventListener("hashchange", render);
-render();
+document.getElementById("ask-devin-btn").addEventListener("click", () => V2.devinModal({}));

@@ -47,9 +47,7 @@ async def test_metric_point_roundtrip(client):
 async def test_ingest_flow(client):
     projects = (await client.get("/api/projects")).json()
     project = next(p for p in projects if p["slug"] == "speedreading")
-    token = (await client.get(f"/api/projects/{project['id']}/ingest-token")).json()[
-        "ingest_token"
-    ]
+    token = (await client.get(f"/api/projects/{project['id']}/ingest-token")).json()["ingest_token"]
 
     r = await client.post(
         "/api/v1/metrics",

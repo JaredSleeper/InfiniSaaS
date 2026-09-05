@@ -78,8 +78,7 @@ async def list_points(
         days,
     )
     return [
-        {"ts": r["ts"].isoformat(), "value": float(r["value"]), "source": r["source"]}
-        for r in rows
+        {"ts": r["ts"].isoformat(), "value": float(r["value"]), "source": r["source"]} for r in rows
     ]
 
 

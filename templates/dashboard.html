@@ -7,18 +7,36 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/app.css?v=1">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
+  <script>
+    window.INFINI = {
+      authEnabled: {{ 'true' if auth_enabled else 'false' }},
+      clerkPublishableKey: "{{ clerk_publishable_key }}",
+      clerkFrontendApi: "{{ clerk_frontend_api }}"
+    };
+  </script>
+  {% if auth_enabled %}
+  <script async crossorigin="anonymous"
+    data-clerk-publishable-key="{{ clerk_publishable_key }}"
+    src="https://{{ clerk_frontend_api }}/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+    onload="window.dispatchEvent(new Event('clerk-ready'))"></script>
+  {% endif %}
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="#/">Infini<span>SaaS</span></a>
     <nav class="nav">
       <a href="#/" data-nav="cockpit">Cockpit</a>
+      <a href="#/inbox" data-nav="inbox">Inbox</a>
       <a href="#/experiments" data-nav="experiments">Experiments</a>
       <a href="#/marketing" data-nav="marketing">Marketing</a>
       <a href="#/learnings" data-nav="learnings">Learnings</a>
+      <a href="#/devin" data-nav="devin">Devin</a>
+      <a href="#/settings" data-nav="settings">Settings</a>
     </nav>
+    <button class="btn btn-devin" id="ask-devin-btn" title="Spawn a Devin session">◆ Send to Devin</button>
     <button class="btn btn-primary" id="new-project-btn">+ Project</button>
+    <div id="user-button"></div>
   </header>
   <main id="view" class="view"></main>
 
@@ -26,6 +44,10 @@
     <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
   </div>
 
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v={{ asset_version }}"></script>
+  <script src="/static/v2-project.js?v={{ asset_version }}"></script>
+  <script src="/static/v2-devin.js?v={{ asset_version }}"></script>
+  <script src="/static/v2-pages.js?v={{ asset_version }}"></script>
+  <script src="/static/boot.js?v={{ asset_version }}"></script>
 </body>
 </html>

@@ -5,7 +5,9 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 
 from src.db import get_pool
-from src.models import ProjectCreate, ProjectOut, ProjectUpdate
+from src.models import ProjectCreate
+from src.models import ProjectOutV2 as ProjectOut
+from src.models import ProjectUpdateV2 as ProjectUpdate
 
 router = APIRouter()
 
@@ -64,7 +66,8 @@ async def update_project(project_id: UUID, body: ProjectUpdate) -> ProjectOut:
         """
         UPDATE projects
         SET name = $2, url = $3, stage = $4, health = $5,
-            description = $6, accent_color = $7, updated_at = now()
+            description = $6, accent_color = $7, repo_url = $8, settings = $9,
+            updated_at = now()
         WHERE id = $1
         RETURNING *
         """,
@@ -75,6 +78,8 @@ async def update_project(project_id: UUID, body: ProjectUpdate) -> ProjectOut:
         merged["health"],
         merged["description"],
         merged["accent_color"],
+        merged.get("repo_url"),
+        merged.get("settings") or {},
     )
     return ProjectOut(**dict(row))
 
