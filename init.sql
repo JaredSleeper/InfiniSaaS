@@ -89,11 +89,15 @@ CREATE TABLE IF NOT EXISTS learnings (
 INSERT INTO projects (slug, name, url, stage, description, accent_color) VALUES
     ('blackjack', 'Get Better At Blackjack', 'https://getbetterat.xyz/blackjack', 'live',
      'Blackjack strategy trainer under the getbetterat.xyz umbrella.', '#3FB68B'),
-    ('speedreading', 'Get Better At Speedreading', 'https://getbetterat.xyz/speedreading', 'live',
+    ('speedreading', 'Get Better At Speedreading', 'https://getbetterat.xyz/speed-reading', 'live',
      'Speedreading trainer under the getbetterat.xyz umbrella.', '#4C8DFF'),
     ('situationmonitor', 'SituationMonitor', NULL, 'live',
      'Scheduled prompt + web data monitoring pipeline (rename pending).', '#D9A03F')
 ON CONFLICT (slug) DO NOTHING;
+
+-- Existing deployments seeded before the URL correction.
+UPDATE projects SET url = 'https://getbetterat.xyz/speed-reading'
+WHERE slug = 'speedreading' AND url = 'https://getbetterat.xyz/speedreading';
 
 -- Default metric set for every seeded project.
 INSERT INTO metrics (project_id, key, name, unit, kind, is_key)
