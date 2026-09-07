@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Header, HTTPException, Query
 
 from src.api.projects import require_project
 from src.db import get_pool
+from src.integrations import posthog
 from src.models import EventsRequest
 
 ingest_router = APIRouter()
@@ -14,8 +16,7 @@ router = APIRouter()
 DEFAULT_FUNNEL = ["visit", "signup", "activate", "pay"]
 
 
-@ingest_router.post("/events", status_code=202)
-async def ingest_events(body: EventsRequest, authorization: str = Header(default="")) -> dict:
+async def _project_for_token(authorization: str) -> UUID:
     token = authorization.removeprefix("Bearer ").strip()
     if not token:
         raise HTTPException(status_code=401, detail="Missing bearer token")
@@ -23,15 +24,37 @@ async def ingest_events(body: EventsRequest, authorization: str = Header(default
     project = await pool.fetchrow("SELECT id FROM projects WHERE ingest_token = $1", token)
     if project is None:
         raise HTTPException(status_code=401, detail="Invalid ingest token")
+    return project["id"]
+
+
+@ingest_router.post("/events", status_code=202)
+async def ingest_events(body: EventsRequest, authorization: str = Header(default="")) -> dict:
+    project_id = await _project_for_token(authorization)
+    pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
         await conn.executemany(
             """
             INSERT INTO events (project_id, name, user_key, ts, properties)
             VALUES ($1, $2, $3, COALESCE($4, now()), $5)
             """,
-            [(project["id"], e.name, e.user_key, e.ts, e.properties) for e in body.events],
+            [(project_id, e.name, e.user_key, e.ts, e.properties) for e in body.events],
         )
     return {"accepted": len(body.events)}
+
+
+@ingest_router.post("/posthog", status_code=202)
+async def ingest_posthog(body: Any = Body(...), authorization: str = Header(default="")) -> dict:
+    """Target for a PostHog webhook destination (default body `{event, person}`).
+
+    Same bearer token as /events. $pageview becomes `visit`, $pathname -> properties.path,
+    distinct_id -> user_key; PostHog's uuid dedupes retries and backfills.
+    """
+    project_id = await _project_for_token(authorization)
+    raws = posthog.unwrap_payload(body)
+    if len(raws) > 1000:
+        raise HTTPException(status_code=413, detail="Max 1000 events per request")
+    accepted, skipped = await posthog.store_events(project_id, raws)
+    return {"accepted": accepted, "skipped": skipped}
 
 
 async def analytics_summary(project_id: UUID, days: int) -> dict:
@@ -82,8 +105,29 @@ async def analytics_summary(project_id: UUID, days: int) -> dict:
     series: dict[str, list] = {}
     for r in daily:
         series.setdefault(r["name"], []).append({"ts": r["day"].isoformat(), "value": r["n"]})
+    sources = await pool.fetch(
+        """
+        SELECT source, count(*) AS n, max(ts) AS last_ts FROM events
+        WHERE project_id = $1 AND ts > now() - make_interval(days => $2)
+        GROUP BY source ORDER BY n DESC
+        """,
+        project_id,
+        days,
+    )
+    ph = await pool.fetchrow(
+        "SELECT config FROM integrations WHERE provider = 'posthog' AND project_id = $1",
+        project_id,
+    )
+    posthog_url = None
+    if ph and (ph["config"] or {}).get("project_id"):
+        posthog_url = posthog.project_url(ph["config"].get("host"), ph["config"]["project_id"])
     return {
         "days": days,
+        "sources": [
+            {"source": r["source"], "count": r["n"], "last_ts": r["last_ts"].isoformat()}
+            for r in sources
+        ],
+        "posthog_url": posthog_url,
         "funnel": funnel,
         "funnel_steps": funnel_steps,
         "events": [{"name": r["name"], "count": r["n"], "users": r["users"]} for r in totals],

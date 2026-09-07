@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
@@ -111,6 +112,122 @@ async def test_events_ingest_and_funnel(client, project):
     assert steps["visit"]["users"] >= 10
     assert steps["signup"]["users"] >= 4
     assert steps["signup"]["rate"] is not None
+
+
+async def test_posthog_webhook_ingest_normalizes_and_dedupes(client, project):
+    await _drop_posthog_integration(client, project["id"])
+    token = (await client.get(f"/api/projects/{project['id']}/ingest-token")).json()["ingest_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    uid = str(uuid4())
+    ts = (datetime.now(UTC) + timedelta(minutes=5)).replace(microsecond=0)
+    pageview = {
+        "event": {
+            "uuid": uid,
+            "event": "$pageview",
+            "distinct_id": "ph_user_1",
+            "timestamp": ts.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "properties": {
+                "$current_url": "https://pagedrones.ai/pricing?x=1",
+                "$pathname": "/pricing",
+                "$browser": "Chrome",
+                "$set": {"email": "x"},
+                "plan": "pro",
+            },
+        },
+        "person": {"id": "p1"},
+    }
+    r = await client.post("/api/v1/posthog", json=pageview, headers=headers)
+    assert r.status_code == 202, r.text
+    assert r.json() == {"accepted": 1, "skipped": 0}
+    # retry of the same PostHog uuid is a no-op; noise events are skipped
+    batch = [
+        pageview,
+        {"event": {"uuid": str(uuid4()), "event": "$pageleave", "distinct_id": "ph_user_1"}},
+        {"event": {"uuid": str(uuid4()), "event": "monitor_created", "distinct_id": "ph_user_1"}},
+    ]
+    r = await client.post("/api/v1/posthog", json=batch, headers=headers)
+    assert r.json() == {"accepted": 1, "skipped": 2}
+    assert (await client.post("/api/v1/posthog", json=pageview)).status_code == 401
+
+    recent = (await client.get(f"/api/analytics/recent?project_id={project['id']}&limit=50")).json()
+    visit = next(e for e in recent if e["external_id"] == uid)
+    assert visit["name"] == "visit" and visit["source"] == "posthog"
+    assert visit["user_key"] == "ph_user_1"
+    assert visit["properties"]["path"] == "/pricing"
+    assert visit["properties"]["browser"] == "Chrome"
+    assert visit["properties"]["plan"] == "pro"
+    assert "$set" not in visit["properties"]
+    assert datetime.fromisoformat(visit["ts"]) == ts
+
+    summary = (await client.get(f"/api/analytics?project_id={project['id']}&days=365")).json()
+    assert {s["source"] for s in summary["sources"]} >= {"posthog"}
+    assert summary["posthog_url"] is None
+
+
+async def test_posthog_backfill_paginates_and_dedupes(client, project, monkeypatch):
+    from src.integrations import posthog
+
+    monkeypatch.setattr(posthog, "PAGE_SIZE", 2)
+    now = datetime.now(UTC).replace(microsecond=0)
+    ids = [str(uuid4()) for _ in range(3)]
+
+    def row(i, name, props):
+        ts = now + timedelta(seconds=i)
+        return [ids[i], name, f"bf_user_{i}", ts.isoformat(), props, int(ts.timestamp() * 1000)]
+
+    pages = [
+        [
+            row(0, "$pageview", '{"$current_url": "https://pagedrones.ai/?utm=x"}'),
+            row(1, "monitor_created", "{}"),
+        ],
+        [row(1, "monitor_created", "{}"), row(2, "$pageleave", "{}")],
+    ]
+    calls: list[str] = []
+
+    async def fake_query(host, ph_project_id, key, hogql, name):
+        calls.append(hogql)
+        return pages.pop(0) if pages else []
+
+    monkeypatch.setattr(posthog, "_query", fake_query)
+    result = await posthog.sync(UUID(project["id"]), "us.posthog.com", "12345", "phx_key", days=7)
+    assert result == {"fetched": 4, "imported": 2, "days": 7}
+    assert "INTERVAL 7 DAY" in calls[0] and "fromUnixTimestamp64Milli" in calls[1]
+
+    recent = (await client.get(f"/api/analytics/recent?project_id={project['id']}&limit=50")).json()
+    by_ext = {e["external_id"]: e for e in recent if e["external_id"] in ids}
+    assert set(by_ext) == {ids[0], ids[1]}
+    assert by_ext[ids[0]]["name"] == "visit" and by_ext[ids[0]]["properties"]["path"] == "/"
+    assert by_ext[ids[1]]["name"] == "monitor_created"
+
+
+async def _drop_posthog_integration(client, project_id):
+    for row in (await client.get("/api/integrations")).json():
+        if row["provider"] == "posthog" and row["project_id"] == project_id:
+            await client.delete(f"/api/integrations/{row['id']}")
+
+
+async def test_posthog_integration_webhook_only(client, project):
+    await _drop_posthog_integration(client, project["id"])
+    providers = (await client.get("/api/integrations/providers")).json()
+    assert providers["posthog"]["secret_optional"] is True
+    r = await client.put(
+        "/api/integrations/posthog",
+        json={
+            "project_id": project["id"],
+            "config": {"project_id": "12345", "host": "us.posthog.com"},
+        },
+    )
+    assert r.status_code == 200, r.text
+    integ = r.json()
+    assert integ["has_secret"] is False
+    r = await client.post(f"/api/integrations/{integ['id']}/verify")
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True and "Webhook-only" in r.json()["detail"]
+    r = await client.post(f"/api/integrations/{integ['id']}/sync")
+    assert r.status_code == 502 and "personal API key" in r.json()["detail"]
+    summary = (await client.get(f"/api/analytics?project_id={project['id']}")).json()
+    assert summary["posthog_url"] == "https://us.posthog.com/project/12345"
+    await client.delete(f"/api/integrations/{integ['id']}")
 
 
 async def test_costs_ads_and_finance(client, project):

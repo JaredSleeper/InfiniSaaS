@@ -116,6 +116,7 @@ window.V2 = window.V2 || { tabs: {} };
             Each project has a bearer token (project page → "Ingest token").<br>
             <span class="mono">POST /api/v1/metrics</span> — metric points<br>
             <span class="mono">POST /api/v1/events</span> — product events for funnels / DAU<br>
+            <span class="mono">POST /api/v1/posthog</span> — target URL for a PostHog webhook destination (same bearer token; $pageview → visit)<br>
             Background loop: uptime every 5 min, integrations hourly, agents on schedule, alerts each tick.
           </div>
         </div>
@@ -131,7 +132,7 @@ window.V2 = window.V2 || { tabs: {} };
             ${projects.map((p) => `<option value="${p.id}" ${existing && existing.project_id === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select>` : `<p class="muted" style="font-size:12px">Global — shared by all projects.</p>`}
           ${meta.config_fields.map((f) => `<label>${esc(f.label)}${f.required ? " *" : ""}</label><input name="cfg_${f.key}" ${f.required ? "required" : ""} value="${esc(existing ? existing.config[f.key] || "" : "")}">`).join("")}
           <label>${esc(meta.secret_label)}${existing && existing.has_secret ? " <span class='muted'>(leave blank to keep)</span>" : ""}</label>
-          <textarea name="secret" rows="2" autocomplete="off" spellcheck="false" ${existing && existing.has_secret ? "" : "required"}></textarea>
+          <textarea name="secret" rows="2" autocomplete="off" spellcheck="false" ${(existing && existing.has_secret) || meta.secret_optional ? "" : "required"}></textarea>
           <p class="muted" style="font-size:12px">Syncs: ${esc(meta.syncs)}</p>`;
       };
       openModal(`

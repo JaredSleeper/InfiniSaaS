@@ -41,6 +41,28 @@ PROVIDERS: dict[str, dict] = {
         ],
         "syncs": "Clicks/impressions/CTR/position metrics + top queries for the SEO agent",
     },
+    "posthog": {
+        "label": "PostHog",
+        "scope": "project",
+        "secret_label": "Personal API key with Query Read (optional: enables Verify + Backfill)",
+        "secret_optional": True,
+        "config_fields": [
+            {
+                "key": "project_id",
+                "label": "PostHog project id (Settings → Project)",
+                "required": True,
+            },
+            {
+                "key": "host",
+                "label": "PostHog app host (https://us.posthog.com or https://eu.posthog.com)",
+                "required": True,
+            },
+        ],
+        "syncs": (
+            "Live events via a PostHog webhook destination → Analytics, funnels, Landing Pages. "
+            "Sync = one-off backfill of the last 30 days via the query API"
+        ),
+    },
     "slack": {
         "label": "Slack",
         "scope": "global",
