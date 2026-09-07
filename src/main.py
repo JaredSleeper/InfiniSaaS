@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import RedirectResponse
 
 from src import scheduler
 from src.api import (
@@ -26,6 +27,7 @@ from src.api import (
     wiki,
 )
 from src.auth import current_user
+from src.config import settings
 from src.db import close_db, init_db
 from src.web import routes as web_routes
 
@@ -45,6 +47,23 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def canonical_host_redirect(request: Request, call_next):
+    """Send browser traffic on non-canonical hosts (e.g. the *.railway.app URL) to PUBLIC_URL.
+
+    Clerk production instances only serve the registered domain, so the SPA is blank elsewhere.
+    Health checks and API/ingest calls are left alone.
+    """
+    canonical = settings.canonical_host
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    path = request.url.path
+    if canonical and host.split(":")[0] != canonical and not path.startswith(("/api/", "/healthz")):
+        url = request.url.replace(scheme="https", netloc=canonical)
+        return RedirectResponse(str(url), status_code=308)
+    return await call_next(request)
+
 
 # Public: health, ingest (per-project bearer tokens), and the SPA shell
 app.include_router(health.router)
