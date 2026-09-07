@@ -675,8 +675,11 @@ async function render() {
       await renderCockpit();
     }
   } catch (ex) {
+    const signOut = window.Clerk && window.Clerk.user
+      ? `<button class="btn" style="margin-top:10px;margin-left:8px" onclick="window.Clerk.signOut()">Sign out</button>`
+      : "";
     $view.innerHTML = `<div class="empty">Something went wrong: ${esc(ex.message)}<br>
-      <button class="btn" style="margin-top:10px" onclick="location.reload()">Reload</button></div>`;
+      <button class="btn" style="margin-top:10px" onclick="location.reload()">Reload</button>${signOut}</div>`;
   }
 }
 

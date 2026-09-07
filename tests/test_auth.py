@@ -55,6 +55,15 @@ async def test_non_allowlisted_user_forbidden(client):
         "/api/projects", headers={"Authorization": f"Bearer {_token('x@example.com')}"}
     )
     assert r.status_code == 403
+    assert r.json()["detail"] == "x@example.com is not on the allowlist"
+
+
+async def test_missing_email_claim_names_user_id(client):
+    tok = jwt.encode({"sub": "user_1"}, KEY, algorithm="RS256", headers={"kid": "k1"})
+    r = await client.get("/api/projects", headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 403
+    assert "user_1" in r.json()["detail"]
+    assert "no 'email' claim" in r.json()["detail"]
 
 
 async def test_bad_signature_rejected(client):
