@@ -69,3 +69,15 @@ async def test_bad_signature_rejected(client):
 async def test_ingest_stays_token_authed(client):
     r = await client.post("/api/v1/events", json={"events": [{"name": "visit"}]})
     assert r.status_code == 401
+
+
+async def test_non_canonical_host_redirects_to_public_url(client, monkeypatch):
+    monkeypatch.setattr(settings, "public_url", "https://app.example.com")
+    r = await client.get("/", headers={"host": "old.up.railway.app"})
+    assert r.status_code == 308
+    assert r.headers["location"] == "https://app.example.com/"
+    # canonical host, health and API paths are untouched
+    assert (await client.get("/", headers={"host": "app.example.com"})).status_code == 200
+    assert (await client.get("/healthz", headers={"host": "old.up.railway.app"})).status_code == 200
+    r = await client.get("/api/projects", headers={"host": "old.up.railway.app"})
+    assert r.status_code == 401

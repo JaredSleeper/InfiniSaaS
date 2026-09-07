@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,6 +33,11 @@ class Settings(BaseSettings):
     # Background scheduler (agent runs, integration syncs, uptime checks)
     scheduler_enabled: bool = True
     scheduler_interval_seconds: int = 300
+
+    @property
+    def canonical_host(self) -> str:
+        """Hostname of PUBLIC_URL; browser requests on other hosts are redirected here."""
+        return (urlparse(self.public_url).hostname or "").lower()
 
     @property
     def auth_enabled(self) -> bool:
