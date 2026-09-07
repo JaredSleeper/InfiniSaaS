@@ -12,7 +12,7 @@ an SEO cockpit, and an agent framework (weekly brief, SEO, analytics, ads) whose
 recommendations can become experiments or Devin sessions. "Send to Devin"
 spawns a Devin session with project + wiki context prefilled, straight from the UI.
 
-Seeded with getbetterat.xyz/blackjack, getbetterat.xyz/speedreading, and
+Seeded with getbetterat.xyz/blackjack, getbetterat.xyz/speed-reading, and
 SituationMonitor.
 
 ## Local dev
