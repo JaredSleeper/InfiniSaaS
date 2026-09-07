@@ -57,5 +57,6 @@ async def current_user(authorization: str = Header(default="")) -> dict:
     user_id = payload.get("sub") or ""
     allowed = settings.allowed_email_set
     if allowed and email not in allowed and user_id.lower() not in allowed:
-        raise HTTPException(status_code=403, detail="This account is not on the allowlist")
+        who = email or f"{user_id} (session token has no 'email' claim)"
+        raise HTTPException(status_code=403, detail=f"{who} is not on the allowlist")
     return {"user_id": user_id, "email": email}
