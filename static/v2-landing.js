@@ -161,7 +161,7 @@ window.V2 = window.V2 || { tabs: {} };
   function discoveredList(perf, showProject) {
     if (!perf.discovered.length) return "";
     return `<div class="section-head" style="margin-top:20px"><h3>Untracked paths with traffic <span class="muted">(${perf.days}d)</span></h3></div>
-      <div class="card" style="padding:0"><table>
+      <div class="card" style="padding:0; overflow-x:auto"><table>
         <thead><tr>${showProject ? "<th>Project</th>" : ""}<th>Path</th><th style="text-align:right">Visitors</th><th style="text-align:right">Views</th><th></th></tr></thead>
         <tbody>${perf.discovered.map((d, i) => `<tr>${showProject ? `<td>${esc(d.project_name)}</td>` : ""}
           <td class="mono">${esc(d.path)}</td><td class="mono" style="text-align:right">${num(d.visitors)}</td><td class="mono" style="text-align:right">${num(d.pageviews)}</td>
@@ -226,7 +226,7 @@ window.V2 = window.V2 || { tabs: {} };
       </td>
       <td><span class="badge">${esc(typeLabel(p.page_type))}</span>${p.cluster ? `<div class="muted" style="font-size:11px; margin-top:3px">${esc(p.cluster)}</div>` : ""}</td>
       <td style="text-align:center">${scoreChip(p.score)}</td>
-      <td class="muted clamp-2" style="font-size:12px; max-width:360px" title="${esc(p.rationale)}${p.angle ? `\n\nAngle: ${esc(p.angle)}` : ""}">${esc(p.rationale || p.angle || "")}</td>
+      <td class="muted" style="font-size:12px; max-width:360px" title="${esc(p.rationale)}${p.angle ? `\n\nAngle: ${esc(p.angle)}` : ""}"><div class="clamp-2">${esc(p.rationale || p.angle || "")}</div></td>
       <td style="text-align:right; white-space:nowrap">
         <button class="btn btn-sm btn-devin" data-bl-devin="${p.id}" title="Send to Devin">◆</button>
         <button class="btn btn-sm" data-bl-edit="${p.id}">Edit</button>
@@ -358,7 +358,7 @@ window.V2 = window.V2 || { tabs: {} };
     return `<tr style="${c.status === "ignored" ? "opacity:0.55" : ""}">
       <td><div><strong><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.name)}</a></strong> ${c.status === "ignored" ? badge("ignored") : ""}${c.source === "agent" ? `<span class="muted" style="font-size:11px" title="Discovered by the landing page agent"> ✦</span>` : ""}</div>
         <div class="mono muted" style="font-size:11px">${esc(c.domain)}${c.pricing ? ` · ${esc(c.pricing)}` : ""}</div></td>
-      <td class="muted clamp-2" style="font-size:12px; max-width:380px" title="${esc(c.positioning)}${c.strengths ? `\n\nStrengths: ${esc(c.strengths)}` : ""}${c.weaknesses ? `\n\nWeaknesses: ${esc(c.weaknesses)}` : ""}">${esc(c.positioning || c.notes || "")}</td>
+      <td class="muted" style="font-size:12px; max-width:380px" title="${esc(c.positioning)}${c.strengths ? `\n\nStrengths: ${esc(c.strengths)}` : ""}${c.weaknesses ? `\n\nWeaknesses: ${esc(c.weaknesses)}` : ""}"><div class="clamp-2">${esc(c.positioning || c.notes || "")}</div></td>
       <td><div class="mono">${num(c.page_count)} <span class="muted" style="font-size:11px">pages</span></div>
         <div class="muted" style="font-size:11px">${types.map(([t, n]) => `${esc(typeLabel(t))} ${n}`).join(" · ")}</div></td>
       <td class="muted" style="font-size:12px; white-space:nowrap">${c.crawl_error ? `<span style="color:var(--bad)" title="${esc(c.crawl_error)}">crawl failed</span><br>` : ""}${ago(c.crawled_at)}</td>
