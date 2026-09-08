@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import asyncpg
@@ -34,6 +35,10 @@ async def init_db() -> asyncpg.Pool:
         async with _pool.acquire() as conn:
             await conn.execute("SELECT pg_advisory_lock(815502)")
             try:
+                # Make the secrets key available to seed SQL if it needs to derive
+                # deterministic per-project ingest tokens or encrypt integration secrets.
+                await conn.execute("SET app.secrets_key = $1", settings.secrets_key)
+                await conn.execute("SET app.posthog_key = $1", os.environ.get("POSTHOG_PERSONAL_API_KEY", ""))
                 await conn.execute(schema.read_text())
             finally:
                 await conn.execute("SELECT pg_advisory_unlock(815502)")
