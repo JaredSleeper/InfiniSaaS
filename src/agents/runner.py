@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -54,6 +55,8 @@ _VALID_CHANNEL = {
 }
 _PAGE_FIELDS = ("path", "headline", "angle", "target_keyword", "channel")
 _VALID_LEVEL = {"low", "medium", "high"}
+STALE_RUN_MINUTES = 30
+_background: set[asyncio.Task] = set()
 
 
 async def _project_snapshot(project_id: UUID, days: int = 7) -> dict:
@@ -371,9 +374,10 @@ def _clean_page(page: dict) -> dict:
     return out
 
 
-async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
+async def run_agent(agent_id: UUID, trigger: str = "manual", *, wait: bool = True) -> UUID:
+    """Create an agent_runs row and execute it; with wait=False the run continues in the
+    background and the returned run_id can be polled for completion."""
     pool = await get_pool()
-    agent = dict(await pool.fetchrow("SELECT * FROM agents WHERE id = $1", agent_id))
     run = await pool.fetchrow(
         """INSERT INTO agent_runs (agent_id, status, trigger, started_at)
            VALUES ($1, 'running', $2, now()) RETURNING id""",
@@ -381,7 +385,19 @@ async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
         trigger,
     )
     run_id = run["id"]
+    if wait:
+        await _execute(run_id, agent_id)
+    else:
+        task = asyncio.get_running_loop().create_task(_execute(run_id, agent_id))
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+    return run_id
+
+
+async def _execute(run_id: UUID, agent_id: UUID) -> None:
+    pool = await get_pool()
     try:
+        agent = dict(await pool.fetchrow("SELECT * FROM agents WHERE id = $1", agent_id))
         ctx = await build_context(agent)
         ideas: dict | None = None
         if agent["kind"] == "landing_pages" and agent["project_id"] is not None:
@@ -457,12 +473,26 @@ async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
             run_id,
             safe_error(exc, 2000),
         )
-    return run_id
+
+
+async def fail_stale_runs(now: datetime | None = None) -> int:
+    """Mark runs still 'running' after STALE_RUN_MINUTES as failed (e.g. lost to a restart)."""
+    now = now or datetime.now(UTC)
+    pool = await get_pool()
+    res = await pool.execute(
+        """UPDATE agent_runs SET status = 'failed', finished_at = now(),
+           error = 'Run did not finish within ' || $2 || ' minutes (server restarted?)'
+           WHERE status = 'running' AND started_at < $1::timestamptz - make_interval(mins => $2)""",
+        now,
+        STALE_RUN_MINUTES,
+    )
+    return int(res.split()[-1])
 
 
 async def run_due(now: datetime | None = None) -> int:
     """Scheduler entrypoint: run enabled daily/weekly agents whose interval elapsed."""
     now = now or datetime.now(UTC)
+    await fail_stale_runs(now)
     pool = await get_pool()
     rows = await pool.fetch(
         """

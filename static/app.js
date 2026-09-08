@@ -32,6 +32,34 @@ async function api(path, opts = {}) {
   return res.status === 204 ? null : res.json();
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/* fetch() rejects with a TypeError ("Failed to fetch") when the connection drops; HTTP
+   errors from api() are plain Errors. */
+const isNetworkError = (ex) => ex instanceof TypeError;
+
+/* Start an agent run and poll until it leaves 'running'. The server keeps working if the
+   browser loses the connection, so a dropped POST falls back to the agent's newest run. */
+async function runAgent(agentId, { onTick, timeoutMs = 10 * 60 * 1000 } = {}) {
+  const startedAt = Date.now();
+  let run;
+  try {
+    run = await api(`/api/agents/${agentId}/run`, { method: "POST" });
+  } catch (ex) {
+    if (!isNetworkError(ex)) throw ex;
+    await sleep(1500);
+    const [latest] = await api(`/api/agents/${agentId}/runs?limit=1`);
+    if (!latest || new Date(latest.created_at).getTime() < startedAt - 60_000) throw ex;
+    run = latest;
+  }
+  while (run.status === "running") {
+    if (Date.now() - startedAt > timeoutMs) throw new Error("Timed out waiting for the run to finish");
+    await sleep(2500);
+    try { run = await api(`/api/agents/runs/${run.id}`); } catch (ex) { if (!isNetworkError(ex)) throw ex; }
+    if (onTick) onTick(run, Math.round((Date.now() - startedAt) / 1000));
+  }
+  return run;
+}
+
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",

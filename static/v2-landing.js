@@ -529,10 +529,12 @@ window.V2 = window.V2 || { tabs: {} };
     if (run) run.addEventListener("click", async () => {
       const status = document.getElementById("lp-agent-status");
       run.textContent = "Running…"; run.disabled = true;
-      status.innerHTML = `<div class="notice">Landing page agent is researching competitors, reading the wiki + keywords and generating a batch of page ideas… usually 1–3 minutes.</div>`;
+      const working = (secs) => `<div class="notice">Landing page agent is researching competitors, reading the wiki + keywords and generating a batch of page ideas… usually 1–3 minutes${secs ? ` (${secs}s)` : ""}. You can leave this tab; the run finishes on the server.</div>`;
+      status.innerHTML = working();
       let result;
-      try { result = await api(`/api/agents/${agent.id}/run`, { method: "POST" }); }
-      catch (ex) { status.innerHTML = `<div class="notice">Run failed: ${esc(ex.message)}</div>`; run.textContent = "Run landing page agent"; run.disabled = false; return; }
+      try { result = await runAgent(agent.id, { onTick: (_r, secs) => { status.innerHTML = working(secs); } }); }
+      catch (ex) { status.innerHTML = `<div class="notice">Run failed: ${esc(ex.message)}. <a href="#/p/${id}/agents">Run history →</a></div>`; run.textContent = "Run landing page agent"; run.disabled = false; return; }
+      if (!status.isConnected) return;
       await rerender();
       const s = document.getElementById("lp-agent-status");
       const lead = esc((result.summary || "").split("\n")[0]).replace(/^_(.+?)\._$/, "<b>$1</b>.");

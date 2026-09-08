@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import httpx
@@ -247,9 +248,20 @@ async def test_landing_agent_context_and_rec_to_page(client, project, clean, mon
         )
 
     monkeypatch.setattr(runner.llm, "complete", fake_complete)
-    r = await client.post(f"/api/agents/{agent['id']}/run")
-    assert r.status_code == 201 and r.json()["status"] == "succeeded", r.text
-    run = r.json()
+
+    async def run_and_wait():
+        r = await client.post(f"/api/agents/{agent['id']}/run")
+        assert r.status_code == 202 and r.json()["status"] == "running", r.text
+        run = r.json()
+        for _ in range(200):
+            run = (await client.get(f"/api/agents/runs/{run['id']}")).json()
+            if run["status"] != "running":
+                break
+            await asyncio.sleep(0.05)
+        assert run["status"] == "succeeded", run
+        return run
+
+    run = await run_and_wait()
     pool = await get_pool()
     run_ctx = (await pool.fetchrow("SELECT context FROM agent_runs WHERE id = $1", run["id"]))[
         "context"
@@ -282,8 +294,8 @@ async def test_landing_agent_context_and_rec_to_page(client, project, clean, mon
     assert len(listed) == 3
 
     # a second run must not re-add the same paths/keywords
-    r = await client.post(f"/api/agents/{agent['id']}/run")
-    assert "0 new page ideas" in r.json()["summary"]
+    run2 = await run_and_wait()
+    assert "0 new page ideas" in run2["summary"]
     n = await pool.fetchval(
         "SELECT count(*) FROM landing_pages WHERE project_id = $1 AND source = 'agent'",
         project["id"],
