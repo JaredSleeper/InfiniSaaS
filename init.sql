@@ -148,7 +148,8 @@ CREATE INDEX IF NOT EXISTS events_project_ts_idx ON events (project_id, ts DESC)
 CREATE INDEX IF NOT EXISTS events_project_name_idx ON events (project_id, name);
 ALTER TABLE integrations DROP CONSTRAINT IF EXISTS integrations_provider_check;
 ALTER TABLE integrations ADD CONSTRAINT integrations_provider_check
-    CHECK (provider IN ('stripe', 'github', 'railway', 'gsc', 'posthog', 'slack', 'custom'));
+    CHECK (provider IN ('stripe', 'github', 'railway', 'gsc', 'posthog', 'slack', 'pagedrones',
+                        'custom'));
 
 ALTER TABLE events ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'ingest';
 ALTER TABLE events ADD COLUMN IF NOT EXISTS external_id text;
@@ -500,3 +501,12 @@ CREATE TABLE IF NOT EXISTS competitors (
     UNIQUE (project_id, domain)
 );
 CREATE INDEX IF NOT EXISTS competitors_project_idx ON competitors (project_id, status);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- v2.4: cockpit ↔ PageDrones loop — published alert templates become landing pages.
+-- ────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS external_id text;
+ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS meta jsonb NOT NULL DEFAULT '{}'::jsonb;
+CREATE INDEX IF NOT EXISTS landing_pages_project_external_idx
+    ON landing_pages (project_id, source, external_id);

@@ -63,6 +63,23 @@ PROVIDERS: dict[str, dict] = {
             "Sync = one-off backfill of the last 30 days via the query API"
         ),
     },
+    "pagedrones": {
+        "label": "PageDrones alerts",
+        "scope": "project",
+        "secret_label": "PageDrones ADMIN_TOKEN (the api service's env var)",
+        "config_fields": [
+            {
+                "key": "base_url",
+                "label": "PageDrones URL (https://pagedrones.com)",
+                "required": True,
+            },
+        ],
+        "syncs": (
+            "Published /alerts/<slug> use-case pages → live landing pages (subscriber counts in "
+            "meta); unpublished templates retire their page. Generate/vet/publish from the "
+            "project's Landing pages tab"
+        ),
+    },
     "slack": {
         "label": "Slack",
         "scope": "global",

@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from src.api.projects import require_project
 from src.db import get_pool
 from src.errors import safe_error
-from src.integrations import github, gsc, posthog, railway, registry, slack, stripe
+from src.integrations import github, gsc, pagedrones, posthog, railway, registry, slack, stripe
 from src.integrations.registry import PROVIDERS
 from src.models import IntegrationOut, IntegrationUpsert, Provider
 
@@ -98,6 +98,14 @@ async def _run(integration_id: UUID, action: str) -> dict:
                     if action == "verify"
                     else await posthog.sync(pid, cfg["host"], cfg["project_id"], secret)
                 )
+        elif provider == "pagedrones":
+            if not secret:
+                raise RuntimeError("No PageDrones admin token stored")
+            result = (
+                await pagedrones.verify(cfg["base_url"], secret)
+                if action == "verify"
+                else await pagedrones.sync(pid, cfg["base_url"], secret)
+            )
         elif provider == "slack":
             if not secret:
                 raise RuntimeError("No webhook stored")
@@ -128,7 +136,7 @@ async def sync_all() -> int:
     pool = await get_pool()
     rows = await pool.fetch(
         "SELECT id FROM integrations"
-        " WHERE provider IN ('stripe', 'github', 'gsc') AND status <> 'error'"
+        " WHERE provider IN ('stripe', 'github', 'gsc', 'pagedrones') AND status <> 'error'"
     )
     n = 0
     for r in rows:

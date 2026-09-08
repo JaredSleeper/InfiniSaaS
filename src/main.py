@@ -21,6 +21,7 @@ from src.api import (
     metrics,
     ops,
     overview,
+    pagedrones,
     product,
     projects,
     seo,
@@ -98,6 +99,7 @@ app.include_router(seo.router, prefix="/api/seo", dependencies=auth)
 app.include_router(landing.perf_router, prefix="/api/landing-pages", dependencies=auth)
 app.include_router(landing.router, prefix="/api/landing-pages", dependencies=auth)
 app.include_router(competitors.router, prefix="/api/competitors", dependencies=auth)
+app.include_router(pagedrones.router, prefix="/api/pagedrones", dependencies=auth)
 app.include_router(devin.router, prefix="/api/devin", dependencies=auth)
 app.include_router(agents.router, prefix="/api/agents", dependencies=auth)
 app.include_router(agents.recs_router, prefix="/api/recommendations", dependencies=auth)

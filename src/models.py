@@ -180,7 +180,7 @@ ContentStatus = Literal["idea", "drafting", "scheduled", "published"]
 CostCategory = Literal["infra", "ads", "tools", "llm", "contractors", "other"]
 AdPlatform = Literal["google", "meta", "reddit", "x", "tiktok", "linkedin", "other"]
 AlertCondition = Literal["below", "above", "drop_pct", "stale_days"]
-Provider = Literal["stripe", "github", "railway", "gsc", "posthog", "slack", "custom"]
+Provider = Literal["stripe", "github", "railway", "gsc", "posthog", "slack", "pagedrones", "custom"]
 AgentKind = Literal["weekly_brief", "seo", "ads", "analytics", "landing_pages", "custom"]
 AgentSchedule = Literal["manual", "daily", "weekly"]
 RecKind = Literal["experiment", "task", "content", "alert", "insight", "landing_page"]
@@ -709,6 +709,8 @@ class LandingPageOut(BaseModel):
     rationale: str
     source: LandingPageSource
     agent_run_id: UUID | None
+    external_id: str | None = None
+    meta: dict = Field(default_factory=dict)
     brief: str
     notes: str
     campaign_id: UUID | None
@@ -726,6 +728,38 @@ class LandingPageBulkDevin(BaseModel):
     ids: list[UUID] = Field(min_length=1, max_length=50)
     instructions: str = ""
     include_wiki: bool = True
+
+
+class LandingPageBulkAlerts(BaseModel):
+    """Turn selected use-case ideas into PageDrones alert-template batches (one per idea)."""
+
+    ids: list[UUID] = Field(min_length=1, max_length=10)
+    n: int = Field(default=10, ge=1, le=50)
+    vet: bool = False
+    notes: str = ""
+
+
+AlertTemplateStatus = Literal["candidate", "vetted", "published", "rejected"]
+
+
+class AlertGenerate(BaseModel):
+    theme: str = Field(min_length=3, max_length=300)
+    n: int = Field(default=10, ge=1, le=50)
+    category: str = Field(default="", max_length=80)
+    audience: str = Field(default="", max_length=200)
+    notes: str = Field(default="", max_length=2000)
+    vet: bool = False
+    landing_page_id: UUID | None = None
+
+
+class AlertVet(BaseModel):
+    ids: list[UUID] = Field(default_factory=list, max_length=100)
+    limit: int = Field(default=10, ge=1, le=100)
+
+
+class AlertBulkStatus(BaseModel):
+    ids: list[UUID] = Field(min_length=1, max_length=500)
+    status: AlertTemplateStatus
 
 
 class CompetitorCreate(BaseModel):

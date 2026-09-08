@@ -346,14 +346,25 @@ async def generate_ideas(agent: dict, ctx: dict, run_id: UUID | None) -> dict:
         "keywords": ctx.get("landing_pages", {}).get("keywords"),
         "competitors": ctx.get("competitors"),
         "market_notes": ctx.get("market_notes"),
+        "alert_templates": ctx.get("alert_templates"),
         "existing_clusters": _clusters(existing),
         "existing_pages_and_ideas (path | keyword | type | cluster | status | score)": _compact(
             existing
         ),
     }
     instr = (agent.get("instructions") or "").strip()
+    alerts = ctx.get("alert_templates") or {}
     prompt = (
         f"Produce exactly {n} new landing-page ideas.\n\n"
+        + (
+            "This product turns use_case ideas into batches of pre-built alerts (see "
+            "alert_templates.how_it_works): make at least a third of the ideas use_case THEMES "
+            "— each one a family of 10-50 concrete alerts an audience would subscribe to, with "
+            "the audience in the angle and the shared trigger in the brief. Favour themes like "
+            "the ones with subscribers, avoid themes already generated.\n\n"
+            if alerts.get("enabled")
+            else ""
+        )
         + (f"Operator instructions:\n{instr}\n\n" if instr else "")
         + "Context (JSON):\n```json\n"
         + json.dumps(idea_ctx, default=str)[:90000]
