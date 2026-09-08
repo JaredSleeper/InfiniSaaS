@@ -14,14 +14,19 @@ from collections import defaultdict
 from urllib.parse import urlparse
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
+from src.api import devin as devin_api
 from src.api.crud import make_router
 from src.api.events import DEFAULT_FUNNEL
 from src.api.projects import require_project
 from src.db import get_pool
 from src.models import (
+    DevinSessionCreate,
+    DevinSessionOut,
     DiscoveredPath,
+    LandingPageBulk,
+    LandingPageBulkDevin,
     LandingPageCreate,
     LandingPageOut,
     LandingPagePerf,
@@ -35,12 +40,74 @@ router = make_router(
     LandingPageUpdate,
     LandingPageOut,
     order_by=(
-        "CASE status WHEN 'live' THEN 0 WHEN 'draft' THEN 1 WHEN 'idea' THEN 2 ELSE 3 END,"
-        " created_at DESC"
+        "CASE status WHEN 'live' THEN 0 WHEN 'draft' THEN 1 WHEN 'vetted' THEN 2"
+        " WHEN 'idea' THEN 3 ELSE 4 END, score DESC NULLS LAST, created_at DESC"
     ),
-    filters=("status", "channel"),
+    filters=("status", "channel", "source"),
+    limit=2000,
 )
 perf_router = APIRouter()
+
+
+@perf_router.post("/bulk-status")
+async def bulk_status(body: LandingPageBulk) -> dict:
+    pool = await get_pool()
+    res = await pool.execute(
+        "UPDATE landing_pages SET status = $2, updated_at = now() WHERE id = ANY($1::uuid[])",
+        body.ids,
+        body.status,
+    )
+    return {"updated": int(res.split()[-1]), "status": body.status}
+
+
+@perf_router.post("/bulk-devin", response_model=DevinSessionOut, status_code=201)
+async def bulk_devin(body: LandingPageBulkDevin) -> DevinSessionOut:
+    """One Devin session that builds every selected page from its brief."""
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT * FROM landing_pages WHERE id = ANY($1::uuid[]) ORDER BY score DESC NULLS LAST",
+        body.ids,
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="No landing pages found")
+    project_ids = {r["project_id"] for r in rows}
+    if len(project_ids) != 1:
+        raise HTTPException(status_code=400, detail="Select pages from a single project")
+    pages = [dict(r) for r in rows]
+    sections = "\n\n".join(devin_api.landing_page_md(p, heading="###") for p in pages)
+    prompt = (
+        f"Build the following {len(pages)} landing pages. Each has a brief; reuse one shared "
+        "template/layout where pages belong to the same cluster or type, keep copy specific to "
+        "each page's target keyword and promise, add proper <title>/meta/H1 per page, and "
+        "link them from a sensible hub page or nav. Open a single PR.\n\n"
+        + (
+            f"Operator instructions:\n{body.instructions.strip()}\n\n"
+            if body.instructions.strip()
+            else ""
+        )
+        + "## Pages\n\n"
+        + sections
+    )
+    first = pages[0]
+    session = await devin_api.create_session(
+        DevinSessionCreate(
+            prompt=prompt,
+            title=f"Build {len(pages)} landing pages",
+            project_id=first["project_id"],
+            source_type="landing_page",
+            source_id=first["id"],
+            include_wiki=body.include_wiki,
+        )
+    )
+    await pool.execute(
+        """UPDATE landing_pages
+           SET status = CASE WHEN status IN ('idea','vetted') THEN 'draft' ELSE status END,
+               notes = trim(both E'\\n' from notes || E'\\n' || $2), updated_at = now()
+           WHERE id = ANY($1::uuid[])""",
+        [p["id"] for p in pages],
+        f"Sent to Devin ({session.url}) with {len(pages) - 1} other page(s).",
+    )
+    return session
 
 
 def _norm_path(value: str | None) -> str | None:
@@ -181,7 +248,8 @@ async def _project_performance(project: dict, days: int) -> tuple[list, list]:
         """
         SELECT lp.*, c.name AS campaign_name FROM landing_pages lp
         LEFT JOIN campaigns c ON c.id = lp.campaign_id
-        WHERE lp.project_id = $1 ORDER BY lp.created_at
+        WHERE lp.project_id = $1 AND lp.status NOT IN ('idea', 'vetted', 'rejected')
+        ORDER BY lp.created_at
         """,
         project["id"],
     )

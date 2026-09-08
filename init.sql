@@ -450,3 +450,53 @@ ALTER TABLE devin_sessions DROP CONSTRAINT IF EXISTS devin_sessions_source_type_
 ALTER TABLE devin_sessions ADD CONSTRAINT devin_sessions_source_type_check
     CHECK (source_type IN ('manual', 'feature_request', 'recommendation', 'experiment',
                            'landing_page'));
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- v2.3: landing pages at scale — idea backlog (type/cluster/score), competitors.
+-- ────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS page_type text NOT NULL DEFAULT 'other';
+ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS cluster text NOT NULL DEFAULT '';
+ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS score smallint
+    CHECK (score IS NULL OR score BETWEEN 0 AND 100);
+ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS rationale text NOT NULL DEFAULT '';
+ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'manual';
+ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS agent_run_id uuid
+    REFERENCES agent_runs(id) ON DELETE SET NULL;
+ALTER TABLE landing_pages DROP CONSTRAINT IF EXISTS landing_pages_status_check;
+ALTER TABLE landing_pages ADD CONSTRAINT landing_pages_status_check
+    CHECK (status IN ('idea', 'vetted', 'draft', 'live', 'retired', 'rejected'));
+ALTER TABLE landing_pages DROP CONSTRAINT IF EXISTS landing_pages_page_type_check;
+ALTER TABLE landing_pages ADD CONSTRAINT landing_pages_page_type_check
+    CHECK (page_type IN ('home', 'feature', 'use_case', 'persona', 'industry', 'comparison',
+                         'alternative', 'integration', 'template', 'glossary', 'guide',
+                         'pricing', 'tool', 'other'));
+ALTER TABLE landing_pages DROP CONSTRAINT IF EXISTS landing_pages_source_check;
+ALTER TABLE landing_pages ADD CONSTRAINT landing_pages_source_check
+    CHECK (source IN ('manual', 'agent', 'discovered', 'pagedrones'));
+CREATE INDEX IF NOT EXISTS landing_pages_project_type_idx ON landing_pages (project_id, page_type);
+CREATE INDEX IF NOT EXISTS landing_pages_project_keyword_idx
+    ON landing_pages (project_id, lower(target_keyword));
+
+CREATE TABLE IF NOT EXISTS competitors (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id  uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name        text NOT NULL,
+    domain      text NOT NULL,
+    url         text NOT NULL,
+    positioning text NOT NULL DEFAULT '',
+    pricing     text NOT NULL DEFAULT '',
+    strengths   text NOT NULL DEFAULT '',
+    weaknesses  text NOT NULL DEFAULT '',
+    notes       text NOT NULL DEFAULT '',
+    source      text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'agent')),
+    status      text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ignored')),
+    pages       jsonb NOT NULL DEFAULT '[]'::jsonb,
+    page_count  integer NOT NULL DEFAULT 0,
+    crawled_at  timestamptz,
+    crawl_error text NOT NULL DEFAULT '',
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, domain)
+);
+CREATE INDEX IF NOT EXISTS competitors_project_idx ON competitors (project_id, status);

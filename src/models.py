@@ -187,7 +187,24 @@ RecKind = Literal["experiment", "task", "content", "alert", "insight", "landing_
 RecStatus = Literal["open", "accepted", "dismissed", "done"]
 Level = Literal["low", "medium", "high"]
 DevinSource = Literal["manual", "feature_request", "recommendation", "experiment", "landing_page"]
-LandingPageStatus = Literal["idea", "draft", "live", "retired"]
+LandingPageStatus = Literal["idea", "vetted", "draft", "live", "retired", "rejected"]
+LandingPageType = Literal[
+    "home",
+    "feature",
+    "use_case",
+    "persona",
+    "industry",
+    "comparison",
+    "alternative",
+    "integration",
+    "template",
+    "glossary",
+    "guide",
+    "pricing",
+    "tool",
+    "other",
+]
+LandingPageSource = Literal["manual", "agent", "discovered", "pagedrones"]
 
 
 class ProjectUpdateV2(ProjectUpdate):
@@ -615,6 +632,11 @@ class LandingPageCreate(BaseModel):
     target_keyword: str = Field(default="", max_length=200)
     channel: Channel = "seo"
     status: LandingPageStatus = "idea"
+    page_type: LandingPageType = "other"
+    cluster: str = Field(default="", max_length=120)
+    score: int | None = Field(default=None, ge=0, le=100)
+    rationale: str = ""
+    source: LandingPageSource = "manual"
     brief: str = ""
     notes: str = ""
     campaign_id: UUID | None = None
@@ -645,6 +667,10 @@ class LandingPageUpdate(BaseModel):
     target_keyword: str | None = Field(default=None, max_length=200)
     channel: Channel | None = None
     status: LandingPageStatus | None = None
+    page_type: LandingPageType | None = None
+    cluster: str | None = Field(default=None, max_length=120)
+    score: int | None = Field(default=None, ge=0, le=100)
+    rationale: str | None = None
     brief: str | None = None
     notes: str | None = None
     campaign_id: UUID | None = None
@@ -677,10 +703,77 @@ class LandingPageOut(BaseModel):
     target_keyword: str
     channel: Channel
     status: LandingPageStatus
+    page_type: LandingPageType
+    cluster: str
+    score: int | None
+    rationale: str
+    source: LandingPageSource
+    agent_run_id: UUID | None
     brief: str
     notes: str
     campaign_id: UUID | None
     experiment_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LandingPageBulk(BaseModel):
+    ids: list[UUID] = Field(min_length=1, max_length=500)
+    status: LandingPageStatus
+
+
+class LandingPageBulkDevin(BaseModel):
+    ids: list[UUID] = Field(min_length=1, max_length=50)
+    instructions: str = ""
+    include_wiki: bool = True
+
+
+class CompetitorCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    url: str = Field(min_length=4, max_length=800)
+    positioning: str = ""
+    pricing: str = ""
+    strengths: str = ""
+    weaknesses: str = ""
+    notes: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def _url(cls, v: str) -> str:
+        v = v.strip()
+        if not v.startswith(("http://", "https://")):
+            v = "https://" + v
+        return v
+
+
+class CompetitorUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    positioning: str | None = None
+    pricing: str | None = None
+    strengths: str | None = None
+    weaknesses: str | None = None
+    notes: str | None = None
+    status: Literal["active", "ignored"] | None = None
+
+
+class CompetitorOut(BaseModel):
+    id: UUID
+    project_id: UUID
+    name: str
+    domain: str
+    url: str
+    positioning: str
+    pricing: str
+    strengths: str
+    weaknesses: str
+    notes: str
+    source: Literal["manual", "agent"]
+    status: Literal["active", "ignored"]
+    pages: list[dict]
+    page_types: dict[str, int] = {}
+    page_count: int
+    crawled_at: datetime | None
+    crawl_error: str
     created_at: datetime
     updated_at: datetime
 
