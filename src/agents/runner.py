@@ -17,7 +17,7 @@ from src.api.ops import uptime_summary
 from src.api.wiki import wiki_markdown
 from src.db import get_pool
 from src.errors import safe_error
-from src.integrations import slack
+from src.integrations import pagedrones, slack
 from src.services.metrics import series, window_sum
 
 log = structlog.get_logger()
@@ -283,6 +283,8 @@ async def _landing_context(project_id: UUID) -> dict:
                 "seo_score": row.seo_score,
             }
         )
+        if page.source == "pagedrones":
+            pages[-1]["alert_subscribers"] = page.meta.get("subscribers", 0)
     return {
         "window_days": perf.days,
         "pages": pages,
@@ -332,6 +334,9 @@ async def build_context(agent: dict) -> dict:
         if notes:
             ctx["market_notes"] = notes
         ctx["landing_pages"] = await _landing_context(project_id)
+        alerts = await pagedrones.context(project_id)
+        if alerts:
+            ctx["alert_templates"] = alerts
         ctx["analytics"] = await analytics_summary(project_id, 30)
         ctx["analytics"].pop("series", None)
     return ctx
@@ -353,7 +358,10 @@ def _prompt_for(agent: dict, ctx: dict) -> str:
         "backlog and why (competitor gaps, keyword demand), headline/angle tests on the "
         "best-trafficked live pages (kind experiment), rewrites or retirement of pages that get "
         "traffic but don't convert, and paths with traffic that should be tracked. Cite "
-        "visitors, signup/pay rates, Search Console clicks/CTR, CPA and competitor evidence.",
+        "visitors, signup/pay rates, Search Console clicks/CTR, CPA and competitor evidence. "
+        "If alert_templates is present, also judge the /alerts/<slug> use-case pages: which "
+        "themes earn subscribers (generate more like them), which pages get visits but no "
+        "signups (rewrite), and which should be retired.",
         "custom": "Follow the agent instructions in the context.",
     }[agent["kind"]]
     instr = agent["instructions"].strip()
