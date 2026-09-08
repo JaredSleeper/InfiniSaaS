@@ -37,8 +37,16 @@ async def init_db() -> asyncpg.Pool:
             try:
                 # Make the secrets key available to seed SQL if it needs to derive
                 # deterministic per-project ingest tokens or encrypt integration secrets.
-                await conn.execute("SET app.secrets_key = $1", settings.secrets_key)
-                await conn.execute("SET app.posthog_key = $1", os.environ.get("POSTHOG_PERSONAL_API_KEY", ""))
+                # GUC parameters must be embedded via set_config; asyncpg cannot
+                # parameterize SET ... $1 directly.
+                await conn.execute(
+                    "SELECT set_config('app.secrets_key', $1, false)",
+                    settings.secrets_key,
+                )
+                await conn.execute(
+                    "SELECT set_config('app.posthog_key', $1, false)",
+                    os.environ.get("POSTHOG_PERSONAL_API_KEY", ""),
+                )
                 await conn.execute(schema.read_text())
             finally:
                 await conn.execute("SELECT pg_advisory_unlock(815502)")
