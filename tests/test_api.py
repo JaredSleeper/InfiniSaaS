@@ -106,3 +106,11 @@ async def test_overview(client):
     assert len(body["projects"]) >= 3
     assert "counts" in body
     assert all("ingest_token" not in p for p in body["projects"])
+
+
+def test_uptime_probe_url_adds_scheme():
+    from src.integrations.uptime import probe_url
+
+    assert probe_url("pagedrones.com") == "https://pagedrones.com"
+    assert probe_url(" http://localhost:8020 ") == "http://localhost:8020"
+    assert probe_url("https://getbetterat.xyz/blackjack") == "https://getbetterat.xyz/blackjack"
