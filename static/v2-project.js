@@ -391,16 +391,18 @@ window.V2 = window.V2 || { tabs: {} };
     const max = Math.max(1, ...a.funnel.map((s) => s.users || s.count));
     root.innerHTML = `
       <div class="section" style="margin-top:12px">
-        <div class="section-head"><h2>Product analytics</h2>
+        <div class="section-head"><h2>Product analytics
+            ${(a.sources || []).map((s) => `<span class="badge" title="last event ${fmtDate(s.last_ts)}">${esc(s.source)} · ${num(s.count)}</span>`).join(" ")}</h2>
           <span class="seg">${[7, 30, 90].map((d) => `<button class="btn btn-sm ${d === days ? "btn-primary" : ""}" data-days="${d}">${d}d</button>`).join("")}
-            <button class="btn btn-sm" id="edit-funnel">Funnel steps</button></span></div>
+            <button class="btn btn-sm" id="edit-funnel">Funnel steps</button>
+            ${a.posthog_url ? `<a class="btn btn-sm" href="${esc(a.posthog_url)}" target="_blank" rel="noopener">Open in PostHog ↗</a>` : ""}</span></div>
         <div class="stat-strip">
           ${stat("Events", num(a.total_events), `${days}d`)}
           ${stat("Distinct event types", a.events.length)}
           ${stat("Latest DAU", a.dau.length ? num(a.dau[a.dau.length - 1].value) : "—")}
           ${stat("Funnel conversion", a.funnel.length > 1 && (a.funnel[0].users || a.funnel[0].count) ? pct((a.funnel[a.funnel.length - 1].users || a.funnel[a.funnel.length - 1].count) / (a.funnel[0].users || a.funnel[0].count) * 100) : "—", "first → last")}
         </div>
-        ${a.total_events === 0 ? `<div class="empty">No events yet. Push them from ${esc(p.name)} with the ingest token (see "Ingest token" above): <code>POST /api/v1/events</code> with names matching your funnel steps: <b>${a.funnel_steps.join(" → ")}</b>.</div>` : ""}
+        ${a.total_events === 0 ? `<div class="empty">No events yet. ${a.posthog_url ? `PostHog is connected — point a PostHog <b>webhook destination</b> at <code>POST /api/v1/posthog</code> (bearer = this project's ingest token, see "Ingest token" above), or hit Sync on the integration to backfill 30 days.` : `Push them from ${esc(p.name)} with the ingest token (see "Ingest token" above): <code>POST /api/v1/events</code>, or connect PostHog in Settings → Integrations.`} Funnel steps: <b>${a.funnel_steps.join(" → ")}</b>.</div>` : ""}
         <div class="grid-2">
           <div class="card">
             <strong>Funnel</strong> <span class="muted" style="font-size:12px">unique users, ${days}d</span>

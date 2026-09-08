@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from src.api.projects import require_project
 from src.db import get_pool
 from src.errors import safe_error
-from src.integrations import github, gsc, railway, registry, slack, stripe
+from src.integrations import github, gsc, posthog, railway, registry, slack, stripe
 from src.integrations.registry import PROVIDERS
 from src.models import IntegrationOut, IntegrationUpsert, Provider
 
@@ -87,6 +87,17 @@ async def _run(integration_id: UUID, action: str) -> dict:
                 if action == "verify"
                 else await gsc.sync(pid, secret, cfg["site_url"], cfg.get("path_prefix"))
             )
+        elif provider == "posthog":
+            if not secret and action == "verify":
+                result = "Webhook-only (no API key): events arrive via the PostHog destination"
+            elif not secret:
+                raise RuntimeError("Backfill needs a personal API key with Query Read")
+            else:
+                result = (
+                    await posthog.verify(cfg["host"], cfg["project_id"], secret)
+                    if action == "verify"
+                    else await posthog.sync(pid, cfg["host"], cfg["project_id"], secret)
+                )
         elif provider == "slack":
             if not secret:
                 raise RuntimeError("No webhook stored")

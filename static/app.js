@@ -360,6 +360,8 @@ function bindProjectHeader(id, p) {
       <div class="token-box">POST /api/v1/metrics<br>Authorization: Bearer ${esc(t.ingest_token)}<br>{"points": [{"metric": "revenue", "value": 42}]}</div>
       <p class="muted" style="margin-top:10px">Push product events (funnel) with the same token:</p>
       <div class="token-box">POST /api/v1/events<br>{"events": [{"name": "signup", "user_key": "u_123", "properties": {"plan": "pro"}}]}</div>
+      <p class="muted" style="margin-top:10px">Using PostHog? Add a webhook destination (Data pipelines → Destinations → Webhook) with:</p>
+      <div class="token-box">POST ${esc(location.origin)}/api/v1/posthog<br>Authorization: Bearer ${esc(t.ingest_token)}<br>Body: default ({"event": …, "person": …})</div>
       <div class="actions"><button class="btn" type="button" data-close>Close</button></div>`);
   });
 

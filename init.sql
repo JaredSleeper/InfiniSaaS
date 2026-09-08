@@ -123,7 +123,8 @@ CREATE TABLE IF NOT EXISTS integrations (
     id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id     uuid REFERENCES projects(id) ON DELETE CASCADE,
     provider       text NOT NULL
-                   CHECK (provider IN ('stripe', 'github', 'railway', 'gsc', 'slack', 'custom')),
+                   CHECK (provider IN ('stripe', 'github', 'railway', 'gsc', 'posthog', 'slack',
+                                       'custom')),
     config         jsonb NOT NULL DEFAULT '{}'::jsonb,
     secret_enc     bytea,
     status         text NOT NULL DEFAULT 'unverified'
@@ -145,6 +146,19 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS events_project_ts_idx ON events (project_id, ts DESC);
 CREATE INDEX IF NOT EXISTS events_project_name_idx ON events (project_id, name);
+ALTER TABLE integrations DROP CONSTRAINT IF EXISTS integrations_provider_check;
+ALTER TABLE integrations ADD CONSTRAINT integrations_provider_check
+    CHECK (provider IN ('stripe', 'github', 'railway', 'gsc', 'posthog', 'slack', 'custom'));
+
+ALTER TABLE events ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'ingest';
+ALTER TABLE events ADD COLUMN IF NOT EXISTS external_id text;
+CREATE UNIQUE INDEX IF NOT EXISTS events_project_external_idx
+    ON events (project_id, external_id) WHERE external_id IS NOT NULL;
+
+-- PageDrones funnel (matches the PostHog events the app emits) unless already customised.
+UPDATE projects
+SET settings = settings || '{"funnel": ["visit", "signup_completed", "monitor_created", "delivery_sent"]}'::jsonb
+WHERE slug = 'situationmonitor' AND NOT (settings ? 'funnel');
 
 CREATE TABLE IF NOT EXISTS costs (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
