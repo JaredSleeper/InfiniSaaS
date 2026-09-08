@@ -251,10 +251,12 @@ window.V2 = window.V2 || { tabs: {} };
     if (run) run.addEventListener("click", async () => {
       const status = document.getElementById("lp-agent-status");
       run.textContent = "Running…"; run.disabled = true;
-      status.innerHTML = `<div class="notice">Landing page agent is reading the wiki, keywords and this table… usually 20–60s.</div>`;
+      const working = (secs) => `<div class="notice">Landing page agent is reading the wiki, keywords and this table… usually 20–60s${secs ? ` (${secs}s)` : ""}. You can leave this tab; the run finishes on the server.</div>`;
+      status.innerHTML = working();
       let result;
-      try { result = await api(`/api/agents/${agent.id}/run`, { method: "POST" }); }
-      catch (ex) { status.innerHTML = `<div class="notice">Run failed: ${esc(ex.message)}</div>`; run.textContent = "Run landing page agent"; run.disabled = false; return; }
+      try { result = await runAgent(agent.id, { onTick: (_r, secs) => { status.innerHTML = working(secs); } }); }
+      catch (ex) { status.innerHTML = `<div class="notice">Run failed: ${esc(ex.message)}. <a href="#/p/${id}/agents">Run history →</a></div>`; run.textContent = "Run landing page agent"; run.disabled = false; return; }
+      if (!status.isConnected) return;
       const after = await api(`/api/recommendations?project_id=${id}&status=open`);
       const fresh = after.filter((r) => r.kind === "landing_page").length - lpRecs.length;
       await rerender();

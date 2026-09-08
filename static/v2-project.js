@@ -763,8 +763,9 @@ window.V2 = window.V2 || { tabs: {} };
       agentModal(id, mine.find((a) => a.id === b.dataset.editAgent), rerender)));
     root.querySelectorAll("[data-run-agent]").forEach((b) => b.addEventListener("click", async () => {
       b.textContent = "Running…"; b.disabled = true;
-      try { await api(`/api/agents/${b.dataset.runAgent}/run`, { method: "POST" }); } catch (ex) { alert(ex.message); }
-      rerender();
+      try { await runAgent(b.dataset.runAgent, { onTick: (_r, secs) => { b.textContent = `Running… ${secs}s`; } }); }
+      catch (ex) { alert(`Run failed: ${ex.message}`); }
+      if (b.isConnected) rerender();
     }));
     V2.bindRecCards(root, recs, rerender);
   };
