@@ -1,14 +1,24 @@
-/* InfiniSaaS v2 — landing pages: registry, cross-project comparison, agent hand-off */
+/* InfiniSaaS v2 — landing pages: registry, cross-project comparison, idea backlog, competitors, agent hand-off */
 
 window.V2 = window.V2 || { tabs: {} };
 
 (function () {
-  const LP_STATUSES = ["idea", "draft", "live", "retired"];
+  const LP_STATUSES = ["idea", "vetted", "draft", "live", "retired", "rejected"];
+  const BACKLOG = ["idea", "vetted", "rejected"];
+  const PAGE_TYPES = ["home", "feature", "use_case", "persona", "industry", "comparison", "alternative", "integration",
+    "template", "glossary", "guide", "pricing", "tool", "other"];
   const money = (v) => v == null ? "—" : "$" + Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
   const num = (v) => v == null ? "—" : Number(v).toLocaleString();
   const pct = (v) => v == null ? "—" : Number(v).toFixed(1) + "%";
   const scoreColor = (s) => s >= 80 ? "var(--good)" : s >= 60 ? "var(--warn)" : "var(--bad)";
   const rateColor = (v, good, warn) => v == null ? "" : `color:${v >= good ? "var(--good)" : v >= warn ? "var(--warn)" : "var(--bad)"}`;
+  const ago = (iso) => {
+    if (!iso) return "never";
+    const h = (Date.now() - new Date(iso)) / 36e5;
+    return h < 1 ? "just now" : h < 48 ? `${Math.round(h)}h ago` : `${Math.round(h / 24)}d ago`;
+  };
+  const scoreChip = (s) => s == null ? `<span class="muted">—</span>` : `<span class="score-chip" style="color:${scoreColor(s)}; border-color:${scoreColor(s)}">${s}</span>`;
+  const typeLabel = (t) => String(t || "other").replace(/_/g, " ");
 
   function actionsRow(extra = "") {
     return `<div class="form-error"></div>
@@ -22,7 +32,8 @@ window.V2 = window.V2 || { tabs: {} };
     const q = projectId ? `?project_id=${projectId}` : "";
     const [allCamps, allExps] = await Promise.all([api(`/api/campaigns${q}`), api(`/api/experiments${q}`)]);
     const lp = existing || { name: "", path: "", url: "", headline: "", angle: "", target_keyword: "",
-      channel: "seo", status: "idea", brief: "", notes: "", campaign_id: null, experiment_id: null, ...prefill };
+      channel: "seo", status: "idea", page_type: "other", cluster: "", score: null, rationale: "",
+      brief: "", notes: "", campaign_id: null, experiment_id: null, ...prefill };
     const pick = (list, sel, label) => `<option value="">— no ${label} —</option>` +
       list.map((x) => `<option value="${x.id}" ${x.id === sel ? "selected" : ""}>${esc(x.name)}</option>`).join("");
     const forProject = (list, pid) => list.filter((x) => x.project_id === pid);
@@ -43,19 +54,26 @@ window.V2 = window.V2 || { tabs: {} };
           <div><label>Target keyword</label><input name="target_keyword" value="${esc(lp.target_keyword)}"></div>
           <div><label>Channel</label><select name="channel">${options(CHANNELS, lp.channel)}</select></div>
         </div>
+        <div class="grid-3">
+          <div><label>Page type</label><select name="page_type">${options(PAGE_TYPES, lp.page_type)}</select></div>
+          <div><label>Cluster <span class="muted">(topic group)</span></label><input name="cluster" value="${esc(lp.cluster)}" placeholder="alternatives"></div>
+          <div><label>Score <span class="muted">(0–100)</span></label><input name="score" type="number" min="0" max="100" value="${lp.score == null ? "" : lp.score}"></div>
+        </div>
         <div class="grid-2">
           <div><label>Status</label><select name="status">${options(LP_STATUSES, lp.status)}</select></div>
           <div><label>Campaign <span class="muted">(joins ad spend)</span></label><select name="campaign_id">${pick(camps, lp.campaign_id, "campaign")}</select></div>
         </div>
         <label>Experiment</label><select name="experiment_id">${pick(exps, lp.experiment_id, "experiment")}</select>
         <label>Angle <span class="muted">(who it's for, why this framing)</span></label><textarea name="angle" rows="2">${esc(lp.angle)}</textarea>
+        <label>Rationale <span class="muted">(why this page should exist — evidence)</span></label><textarea name="rationale" rows="2">${esc(lp.rationale)}</textarea>
         <label>Brief <span class="muted">(what to build — sent to Devin)</span></label><textarea name="brief" rows="4">${esc(lp.brief)}</textarea>
         <label>Notes</label><textarea name="notes" rows="2">${esc(lp.notes)}</textarea>
         ${actionsRow(existing ? `<button class="btn btn-danger" type="button" data-delete="${lp.id}">Delete</button>` : "")}
       </form>`, async (fd) => {
       const body = {};
-      for (const k of ["name", "path", "url", "headline", "target_keyword", "channel", "status", "angle", "brief", "notes"]) body[k] = fd.get(k);
+      for (const k of ["name", "path", "url", "headline", "target_keyword", "channel", "status", "page_type", "cluster", "angle", "rationale", "brief", "notes"]) body[k] = fd.get(k);
       body.url = body.url || null;
+      body.score = fd.get("score") === "" ? null : Number(fd.get("score"));
       body.campaign_id = fd.get("campaign_id") || null;
       body.experiment_id = fd.get("experiment_id") || null;
       const pid = projectId || fd.get("project_id");
@@ -75,7 +93,7 @@ window.V2 = window.V2 || { tabs: {} };
     });
   };
 
-  /* ── comparison table ── */
+  /* ── comparison table (live / draft / retired pages) ── */
   function pageRow(r, showProject) {
     const p = r.page;
     const href = p.url || null;
@@ -85,7 +103,7 @@ window.V2 = window.V2 || { tabs: {} };
         <div class="mono muted" style="font-size:11px">${showProject ? `<a href="#/p/${p.project_id}/landing" style="color:${esc(r.accent_color)}">●</a> ` : ""}${esc(p.path)}${p.target_keyword ? ` · <span title="target keyword">🔍 ${esc(p.target_keyword)}</span>` : ""}</div>
         ${p.headline ? `<div class="muted clamp-2" style="font-size:12px; margin-top:2px">“${esc(p.headline)}”</div>` : ""}
       </td>
-      <td>${badge(p.channel)}${r.campaign_name ? `<div class="muted" style="font-size:11px">${esc(r.campaign_name)}</div>` : ""}</td>
+      <td>${badge(p.channel)}<div class="muted" style="font-size:11px">${esc(typeLabel(p.page_type))}${r.campaign_name ? ` · ${esc(r.campaign_name)}` : ""}</div></td>
       <td class="mono" style="text-align:right">${num(r.visitors)}<div class="muted" style="font-size:11px">${num(r.pageviews)} views</div></td>
       <td class="mono" style="text-align:right">${num(r.signups)}<div style="font-size:11px; ${rateColor(r.signup_rate, 5, 2)}">${pct(r.signup_rate)}</div></td>
       <td class="mono" style="text-align:right">${num(r.pays)}<div style="font-size:11px; ${rateColor(r.pay_rate, 1, 0.3)}">${pct(r.pay_rate)}</div></td>
@@ -150,6 +168,11 @@ window.V2 = window.V2 || { tabs: {} };
           <td style="text-align:right"><button class="btn btn-sm" data-lp-track="${i}">Track</button></td></tr>`).join("")}</tbody></table></div>`;
   }
 
+  function devinPromptFor(p) {
+    const verb = p.status === "live" ? "Improve" : "Build";
+    return `${verb} the landing page at ${p.path}${p.headline ? ` ("${p.headline}")` : ""}. Follow the brief, keep the site's design system, instrument visit/signup events with properties.path, and open a PR.`;
+  }
+
   function bindTable(root, perf, rerender) {
     const byId = (id) => perf.pages.find((r) => r.page.id === id).page;
     root.querySelectorAll("[data-lp-edit]").forEach((b) => b.addEventListener("click", () => {
@@ -157,9 +180,7 @@ window.V2 = window.V2 || { tabs: {} };
     }));
     root.querySelectorAll("[data-lp-devin]").forEach((b) => b.addEventListener("click", () => {
       const p = byId(b.dataset.lpDevin);
-      const verb = p.status === "live" ? "Improve" : "Build";
-      V2.devinModal({ project_id: p.project_id, source_type: "landing_page", source_id: p.id, title: p.name,
-        prompt: `${verb} the landing page at ${p.path}${p.headline ? ` ("${p.headline}")` : ""}. Follow the brief, keep the site's design system, instrument visit/signup events with properties.path, and open a PR.` });
+      V2.devinModal({ project_id: p.project_id, source_type: "landing_page", source_id: p.id, title: p.name, prompt: devinPromptFor(p) });
     }));
     root.querySelectorAll("[data-lp-audit]").forEach((b) => b.addEventListener("click", async () => {
       const p = byId(b.dataset.lpAudit);
@@ -175,6 +196,252 @@ window.V2 = window.V2 || { tabs: {} };
     }));
   }
 
+  /* ── idea backlog: agent-generated + manual ideas, vetted in bulk before they become drafts ── */
+  /* Filter/selection state survives re-renders, keyed by scope ("global" or a project id). */
+  const backlogState = {};
+  function stateFor(key) {
+    return backlogState[key] || (backlogState[key] = { status: "open", type: "", cluster: "", minScore: 0, q: "", limit: 50, selected: new Set() });
+  }
+
+  function filterBacklog(pages, st) {
+    const q = st.q.trim().toLowerCase();
+    return pages
+      .filter((p) => BACKLOG.includes(p.status))
+      .filter((p) => st.status === "open" ? p.status !== "rejected" : st.status === "all" ? true : p.status === st.status)
+      .filter((p) => !st.type || p.page_type === st.type)
+      .filter((p) => !st.cluster || p.cluster === st.cluster)
+      .filter((p) => !st.minScore || (p.score != null && p.score >= st.minScore))
+      .filter((p) => !q || [p.name, p.path, p.target_keyword, p.headline, p.cluster, p.angle].some((v) => String(v || "").toLowerCase().includes(q)))
+      .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (a.created_at < b.created_at ? 1 : -1));
+  }
+
+  function backlogRow(p, st, showProject, projectsById) {
+    const proj = projectsById[p.project_id];
+    return `<tr class="${st.selected.has(p.id) ? "selected" : ""}">
+      <td style="width:28px"><input type="checkbox" data-bl-sel="${p.id}" ${st.selected.has(p.id) ? "checked" : ""}></td>
+      <td>
+        <div><strong>${esc(p.name)}</strong> ${p.status !== "idea" ? badge(p.status) : ""}${p.source === "agent" ? `<span class="muted" style="font-size:11px" title="Generated by the landing page agent"> ✦</span>` : ""}</div>
+        <div class="mono muted" style="font-size:11px">${showProject && proj ? `<a href="#/p/${p.project_id}/landing" style="color:${esc(proj.accent_color)}" title="${esc(proj.name)}">●</a> ` : ""}${esc(p.path)}${p.target_keyword ? ` · 🔍 ${esc(p.target_keyword)}` : ""}</div>
+        ${p.headline ? `<div class="muted clamp-2" style="font-size:12px; margin-top:2px">“${esc(p.headline)}”</div>` : ""}
+      </td>
+      <td><span class="badge">${esc(typeLabel(p.page_type))}</span>${p.cluster ? `<div class="muted" style="font-size:11px; margin-top:3px">${esc(p.cluster)}</div>` : ""}</td>
+      <td style="text-align:center">${scoreChip(p.score)}</td>
+      <td class="muted clamp-2" style="font-size:12px; max-width:360px" title="${esc(p.rationale)}${p.angle ? `\n\nAngle: ${esc(p.angle)}` : ""}">${esc(p.rationale || p.angle || "")}</td>
+      <td style="text-align:right; white-space:nowrap">
+        <button class="btn btn-sm btn-devin" data-bl-devin="${p.id}" title="Send to Devin">◆</button>
+        <button class="btn btn-sm" data-bl-edit="${p.id}">Edit</button>
+      </td>
+    </tr>`;
+  }
+
+  V2.backlogSection = function (pages, { key, showProject = false, projects = [], hasAgent = false } = {}) {
+    const st = stateFor(key);
+    const all = pages.filter((p) => BACKLOG.includes(p.status));
+    const counts = { idea: 0, vetted: 0, rejected: 0 };
+    all.forEach((p) => { counts[p.status] += 1; });
+    const clusters = {};
+    all.filter((p) => p.status !== "rejected").forEach((p) => { if (p.cluster) clusters[p.cluster] = (clusters[p.cluster] || 0) + 1; });
+    const types = {};
+    all.filter((p) => p.status !== "rejected").forEach((p) => { types[p.page_type] = (types[p.page_type] || 0) + 1; });
+    const rows = filterBacklog(pages, st);
+    const shown = rows.slice(0, st.limit);
+    const projectsById = Object.fromEntries(projects.map((p) => [p.id, p]));
+    const sel = st.selected.size;
+    const opt = (v, label, cur) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(label)}</option>`;
+    return `<div class="section" style="margin-top:24px" id="bl-${esc(key)}">
+      <div class="section-head"><h2>Idea backlog <span class="muted">(${counts.idea} ideas · ${counts.vetted} vetted · ${counts.rejected} rejected)</span></h2>
+        <span class="muted" style="font-size:12px">${hasAgent ? "Every agent run adds a scored batch. Vet the ones worth building, reject the rest, then send vetted ideas to Devin in bulk." : "Ideas accumulate here; add the landing page agent to generate them from competitor research and your keywords."}</span></div>
+      ${all.length ? `
+      <div class="card-row filter-bar">
+        <span class="seg">
+          ${[["open", "open"], ["idea", "ideas"], ["vetted", "vetted"], ["rejected", "rejected"], ["all", "all"]].map(([v, l]) => `<button class="btn btn-sm ${st.status === v ? "btn-primary" : ""}" data-bl-status="${v}">${l}</button>`).join("")}
+        </span>
+        <select data-bl-type style="width:auto">${opt("", `any type (${Object.keys(types).length})`, st.type)}${Object.entries(types).sort((a, b) => b[1] - a[1]).map(([t, n]) => opt(t, `${typeLabel(t)} (${n})`, st.type)).join("")}</select>
+        <select data-bl-cluster style="width:auto">${opt("", `any cluster (${Object.keys(clusters).length})`, st.cluster)}${Object.entries(clusters).sort((a, b) => b[1] - a[1]).map(([c, n]) => opt(c, `${c} (${n})`, st.cluster)).join("")}</select>
+        <select data-bl-score style="width:auto">${[0, 50, 60, 70, 80, 90].map((s) => opt(String(s), s ? `score ≥ ${s}` : "any score", String(st.minScore))).join("")}</select>
+        <input data-bl-q placeholder="search path, keyword, headline…" value="${esc(st.q)}" style="width:220px">
+        <span class="muted" style="font-size:12px; margin-left:auto">${rows.length} match${rows.length === 1 ? "" : "es"}</span>
+      </div>
+      <div class="bulk-bar ${sel ? "" : "hidden"}">
+        <b>${sel} selected</b>
+        <button class="btn btn-sm" data-bl-bulk="vetted">✓ Vet</button>
+        <button class="btn btn-sm" data-bl-bulk="rejected">✕ Reject</button>
+        <button class="btn btn-sm" data-bl-bulk="idea">↺ Back to idea</button>
+        <button class="btn btn-sm" data-bl-bulk="draft">→ Draft</button>
+        <button class="btn btn-sm btn-devin" data-bl-bulk-devin>◆ Send ${sel} to Devin</button>
+        <button class="btn btn-sm" data-bl-clear style="margin-left:auto">Clear</button>
+      </div>
+      <div class="card" style="padding:0; overflow-x:auto"><table class="backlog">
+        <thead><tr><th style="width:28px"><input type="checkbox" data-bl-all ${rows.length && rows.every((p) => st.selected.has(p.id)) ? "checked" : ""} title="Select all ${rows.length} matching"></th>
+          <th>Page idea</th><th>Type · cluster</th><th style="text-align:center" title="Agent score 0–100: search intent × competition × ICP fit">Score</th><th>Why</th><th></th></tr></thead>
+        <tbody>${shown.map((p) => backlogRow(p, st, showProject, projectsById)).join("") || `<tr><td colspan="6" class="muted" style="text-align:center; padding:18px">No ideas match this filter.</td></tr>`}</tbody></table>
+        ${rows.length > shown.length ? `<div style="padding:10px; text-align:center"><button class="btn btn-sm" data-bl-more>Show ${Math.min(100, rows.length - shown.length)} more of ${rows.length - shown.length}</button></div>` : ""}
+      </div>` : `<div class="empty">No ideas yet. ${hasAgent ? "Run the <b>landing page agent</b> — each run researches competitors and adds a batch of scored page ideas here." : "Add the landing page agent (above) to start generating ideas, or add pages manually with status <b>idea</b>."}</div>`}
+    </div>`;
+  };
+
+  async function bulkDevinModal(pages, rerender) {
+    const pid = pages[0].project_id;
+    if (pages.some((p) => p.project_id !== pid)) { alert("Select ideas from a single project to send them to one Devin session."); return; }
+    if (pages.length > 50) { alert("Send at most 50 pages per Devin session."); return; }
+    const status = await api("/api/devin/status");
+    openModal(`
+      <h2><span class="devin-mark">◆</span> Build ${pages.length} landing page${pages.length === 1 ? "" : "s"} with Devin</h2>
+      ${status.configured ? "" : `<div class="notice">DEVIN_API_KEY is not configured — the session will be recorded as <b>mock</b>.</div>`}
+      <form>
+        <div class="card" style="max-height:220px; overflow:auto; padding:8px 12px; font-size:12px">
+          ${pages.map((p) => `<div class="mono">${esc(p.path)} <span class="muted">— ${esc(p.name)}${p.score != null ? ` · ${p.score}` : ""}</span></div>`).join("")}
+        </div>
+        <label>Extra instructions <span class="muted">(briefs, headlines and keywords are included automatically)</span></label>
+        <textarea name="instructions" rows="4" placeholder="Reuse the existing page template; add each new page to the sitemap; one PR for the whole batch."></textarea>
+        <label><input type="checkbox" name="include_wiki" checked style="width:auto"> Include product wiki as context</label>
+        <div class="muted" style="font-size:12px; margin-top:8px">Selected ideas move to <b>draft</b> and get the session link in their notes.</div>
+        <div class="form-error"></div>
+        <div class="actions"><button class="btn" type="button" data-close>Cancel</button>
+          <button class="btn btn-devin" type="submit">◆ Launch session</button></div>
+      </form>`, async (fd) => {
+      const created = await api("/api/landing-pages/bulk-devin", { method: "POST", body: JSON.stringify({
+        ids: pages.map((p) => p.id), instructions: fd.get("instructions") || "", include_wiki: fd.get("include_wiki") === "on" }) });
+      window.open(created.url, "_blank", "noopener");
+      rerender();
+    });
+  }
+
+  function bindBacklog(root, pages, key, rerender) {
+    const st = stateFor(key);
+    const sec = root.querySelector(`#bl-${key}`);
+    if (!sec) return;
+    const byId = (id) => pages.find((p) => p.id === id);
+    const rows = filterBacklog(pages, st);
+    const set = (patch) => { Object.assign(st, patch); rerender(); };
+    sec.querySelectorAll("[data-bl-status]").forEach((b) => b.addEventListener("click", () => set({ status: b.dataset.blStatus, limit: 50 })));
+    const on = (selector, event, fn) => { const el = sec.querySelector(selector); if (el) el.addEventListener(event, fn); };
+    on("[data-bl-type]", "change", (e) => set({ type: e.target.value, limit: 50 }));
+    on("[data-bl-cluster]", "change", (e) => set({ cluster: e.target.value, limit: 50 }));
+    on("[data-bl-score]", "change", (e) => set({ minScore: Number(e.target.value), limit: 50 }));
+    on("[data-bl-q]", "input", (e) => {
+      clearTimeout(st._t); st._t = setTimeout(() => set({ q: e.target.value, limit: 50 }), 250);
+    });
+    on("[data-bl-more]", "click", () => set({ limit: st.limit + 100 }));
+    on("[data-bl-all]", "change", (e) => {
+      if (e.target.checked) rows.forEach((p) => st.selected.add(p.id)); else rows.forEach((p) => st.selected.delete(p.id));
+      rerender();
+    });
+    on("[data-bl-clear]", "click", () => { st.selected.clear(); rerender(); });
+    sec.querySelectorAll("[data-bl-sel]").forEach((cb) => cb.addEventListener("change", () => {
+      if (cb.checked) st.selected.add(cb.dataset.blSel); else st.selected.delete(cb.dataset.blSel);
+      rerender();
+    }));
+    sec.querySelectorAll("[data-bl-bulk]").forEach((b) => b.addEventListener("click", async () => {
+      const ids = [...st.selected].filter(byId);
+      if (!ids.length) return;
+      b.disabled = true; b.textContent = "…";
+      try {
+        await api("/api/landing-pages/bulk-status", { method: "POST", body: JSON.stringify({ ids, status: b.dataset.blBulk }) });
+        st.selected.clear();
+      } catch (ex) { alert(ex.message); }
+      rerender();
+    }));
+    on("[data-bl-bulk-devin]", "click", () => {
+      const sel = [...st.selected].map(byId).filter(Boolean);
+      if (sel.length) bulkDevinModal(sel, () => { st.selected.clear(); rerender(); });
+    });
+    sec.querySelectorAll("[data-bl-edit]").forEach((b) => b.addEventListener("click", () => {
+      const p = byId(b.dataset.blEdit); V2.landingModal(p.project_id, p, rerender);
+    }));
+    sec.querySelectorAll("[data-bl-devin]").forEach((b) => b.addEventListener("click", () => bulkDevinModal([byId(b.dataset.blDevin)], rerender)));
+  }
+
+  /* ── competitors (per project) ── */
+  function competitorRow(c) {
+    const types = Object.entries(c.page_types || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    return `<tr style="${c.status === "ignored" ? "opacity:0.55" : ""}">
+      <td><div><strong><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.name)}</a></strong> ${c.status === "ignored" ? badge("ignored") : ""}${c.source === "agent" ? `<span class="muted" style="font-size:11px" title="Discovered by the landing page agent"> ✦</span>` : ""}</div>
+        <div class="mono muted" style="font-size:11px">${esc(c.domain)}${c.pricing ? ` · ${esc(c.pricing)}` : ""}</div></td>
+      <td class="muted clamp-2" style="font-size:12px; max-width:380px" title="${esc(c.positioning)}${c.strengths ? `\n\nStrengths: ${esc(c.strengths)}` : ""}${c.weaknesses ? `\n\nWeaknesses: ${esc(c.weaknesses)}` : ""}">${esc(c.positioning || c.notes || "")}</td>
+      <td><div class="mono">${num(c.page_count)} <span class="muted" style="font-size:11px">pages</span></div>
+        <div class="muted" style="font-size:11px">${types.map(([t, n]) => `${esc(typeLabel(t))} ${n}`).join(" · ")}</div></td>
+      <td class="muted" style="font-size:12px; white-space:nowrap">${c.crawl_error ? `<span style="color:var(--bad)" title="${esc(c.crawl_error)}">crawl failed</span><br>` : ""}${ago(c.crawled_at)}</td>
+      <td style="text-align:right; white-space:nowrap">
+        <button class="btn btn-sm" data-comp-crawl="${c.id}" title="Re-crawl sitemap and page metadata">Recrawl</button>
+        <button class="btn btn-sm" data-comp-toggle="${c.id}">${c.status === "ignored" ? "Unignore" : "Ignore"}</button>
+        <button class="btn btn-sm btn-danger" data-comp-del="${c.id}" title="Delete">✕</button>
+      </td>
+    </tr>`;
+  }
+
+  V2.competitorsSection = function (comps) {
+    const active = comps.filter((c) => c.status === "active");
+    const pages = active.reduce((s, c) => s + c.page_count, 0);
+    return `<div class="section" style="margin-top:24px" id="competitors">
+      <div class="section-head"><h2>Competitors <span class="muted">(${active.length} tracked · ${num(pages)} pages indexed)</span></h2>
+        <span><button class="btn btn-sm" id="comp-discover" title="Web-search for competitors and crawl their sites (1–2 min)">Discover competitors</button>
+          <button class="btn btn-sm" id="comp-add">+ Competitor</button></span></div>
+      <div id="comp-status"></div>
+      ${comps.length ? `<div class="card" style="padding:0; overflow-x:auto"><table>
+        <thead><tr><th>Competitor</th><th>Positioning</th><th>Site inventory</th><th>Crawled</th><th></th></tr></thead>
+        <tbody>${comps.map(competitorRow).join("")}</tbody></table></div>`
+        : `<div class="empty">No competitors yet. <b>Discover</b> uses web search to find them and crawls their sitemaps so the agent can see which pages they rank with; or add one by URL.</div>`}
+    </div>`;
+  };
+
+  function competitorModal(projectId, rerender) {
+    openModal(`
+      <h2>Add competitor</h2>
+      <form>
+        <div class="grid-2">
+          <div><label>Name</label><input name="name" required placeholder="Spreeder"></div>
+          <div><label>URL</label><input name="url" required placeholder="https://www.spreeder.com"></div>
+        </div>
+        <label>Positioning <span class="muted">(how they pitch themselves)</span></label><textarea name="positioning" rows="2"></textarea>
+        <label>Pricing</label><input name="pricing" placeholder="$7.99/mo">
+        <label>Notes</label><textarea name="notes" rows="2"></textarea>
+        <div class="muted" style="font-size:12px; margin-top:8px">Saving crawls the site's sitemap (up to 600 URLs, ~30s).</div>
+        ${actionsRow()}
+      </form>`, async (fd) => {
+      const body = {};
+      for (const k of ["name", "url", "positioning", "pricing", "notes"]) body[k] = fd.get(k);
+      await api(`/api/competitors/projects/${projectId}`, { method: "POST", body: JSON.stringify(body) });
+      rerender();
+    });
+  }
+
+  function bindCompetitors(root, comps, projectId, rerender) {
+    const sec = root.querySelector("#competitors");
+    if (!sec) return;
+    const status = sec.querySelector("#comp-status");
+    sec.querySelector("#comp-add").addEventListener("click", () => competitorModal(projectId, rerender));
+    const disc = sec.querySelector("#comp-discover");
+    disc.addEventListener("click", async () => {
+      disc.disabled = true; disc.textContent = "Searching…";
+      status.innerHTML = `<div class="notice">Searching the web for competitors and crawling their sitemaps… usually 1–2 minutes.</div>`;
+      try {
+        const res = await api(`/api/competitors/projects/${projectId}/discover`, { method: "POST" });
+        await rerender();
+        const s = root.querySelector("#comp-status");
+        if (s) s.innerHTML = `<div class="notice">${res.mock ? "ANTHROPIC_API_KEY is not configured — discovery ran in mock mode. " : ""}<b>${res.competitors.length} new competitor${res.competitors.length === 1 ? "" : "s"}</b> found${res.competitors.length ? `: ${res.competitors.map((c) => esc(c.name)).join(", ")}` : ""}.${res.market_notes ? `<div class="muted" style="font-size:12px; margin-top:6px">${esc(res.market_notes)}</div>` : ""}</div>`;
+      } catch (ex) {
+        status.innerHTML = `<div class="notice">Discovery failed: ${esc(ex.message)}</div>`;
+        disc.disabled = false; disc.textContent = "Discover competitors";
+      }
+    });
+    sec.querySelectorAll("[data-comp-crawl]").forEach((b) => b.addEventListener("click", async () => {
+      b.disabled = true; b.textContent = "…";
+      try { await api(`/api/competitors/${b.dataset.compCrawl}/crawl`, { method: "POST" }); } catch (ex) { alert(ex.message); }
+      rerender();
+    }));
+    sec.querySelectorAll("[data-comp-toggle]").forEach((b) => b.addEventListener("click", async () => {
+      const c = comps.find((x) => x.id === b.dataset.compToggle);
+      await api(`/api/competitors/${c.id}`, { method: "PATCH", body: JSON.stringify({ status: c.status === "ignored" ? "active" : "ignored" }) });
+      rerender();
+    }));
+    sec.querySelectorAll("[data-comp-del]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Delete this competitor and its cached inventory?")) return;
+      await api(`/api/competitors/${b.dataset.compDel}`, { method: "DELETE" });
+      rerender();
+    }));
+  }
+
   function daysSeg(days) {
     return `<span class="seg">${[7, 30, 90].map((d) => `<button class="btn btn-sm ${d === days ? "btn-primary" : ""}" data-days="${d}">${d}d</button>`).join("")}</span>`;
   }
@@ -182,13 +449,16 @@ window.V2 = window.V2 || { tabs: {} };
   /* ── global dashboard: #/landing-pages ── */
   V2.renderLandingPages = async function (days = 30, filter = {}) {
     days = Number(days) || 30;
-    const [perf, projects, recs] = await Promise.all([
+    const [perf, projects, recs, allPages, agents] = await Promise.all([
       api(`/api/landing-pages/performance?days=${days}`), api("/api/projects"),
-      api("/api/recommendations?status=open&limit=200"),
+      api("/api/recommendations?status=open&limit=200"), api("/api/landing-pages"),
+      api("/api/agents"),
     ]);
-    const lpRecs = recs.filter((r) => r.kind === "landing_page");
+    const lpRecs = recs.filter((r) => r.kind === "landing_page" && (!filter.project || r.project_id === filter.project));
     const rows = perf.pages.filter((r) => (!filter.project || r.page.project_id === filter.project) && (!filter.status || r.page.status === filter.status));
     const shown = { ...perf, pages: rows, discovered: perf.discovered.filter((d) => !filter.project || d.project_id === filter.project) };
+    const backlog = allPages.filter((p) => !filter.project || p.project_id === filter.project);
+    const hasAgent = agents.some((a) => a.kind === "landing_pages" && (!filter.project || a.project_id === filter.project));
     const rerender = () => V2.renderLandingPages(days, filter);
     $view.innerHTML = `
       <div class="page-head">
@@ -202,14 +472,15 @@ window.V2 = window.V2 || { tabs: {} };
         </span>
         <span class="seg">
           <button class="btn btn-sm ${filter.status ? "" : "btn-primary"}" data-st="">any status</button>
-          ${LP_STATUSES.map((s) => `<button class="btn btn-sm ${filter.status === s ? "btn-primary" : ""}" data-st="${s}">${s}</button>`).join("")}
+          ${["live", "draft", "retired"].map((s) => `<button class="btn btn-sm ${filter.status === s ? "btn-primary" : ""}" data-st="${s}">${s}</button>`).join("")}
         </span>
       </div>
-      ${V2.landingTable(shown, { showProject: true }) || `<div class="empty">${perf.pages.length ? "No pages match this filter." : `No landing pages registered yet. Add one, or run the <b>Landing page agent</b> on a project's Agents tab and accept a suggestion.<br><span class="muted" style="font-size:12px">Tracking works via the events ingest: send <code>visit</code> events with <code>properties.path</code>.</span>`}</div>`}
+      ${V2.landingTable(shown, { showProject: true }) || `<div class="empty">${perf.pages.length ? "No pages match this filter." : `No live or draft landing pages registered yet. Add one, track an untracked path below, or vet ideas from the backlog and send them to Devin.<br><span class="muted" style="font-size:12px">Tracking works via the events ingest / PostHog: <code>visit</code> events with <code>properties.path</code>.</span>`}</div>`}
       ${discoveredList(shown, true)}
+      ${V2.backlogSection(backlog, { key: "global", showProject: true, projects, hasAgent })}
       <div class="section" style="margin-top:24px">
-        <div class="section-head"><h2>Page suggestions <span class="muted">(${lpRecs.length} open)</span></h2><a href="#/inbox" class="muted" style="font-size:12px">all recommendations →</a></div>
-        <div class="grid-2">${lpRecs.map((r) => V2.recCard(r, { showProject: true, projects })).join("") || `<div class="empty">No open page suggestions. Run a project's <b>Landing page agent</b> — it reads the wiki, keywords and this table and proposes pages to build, test or retire.</div>`}</div>
+        <div class="section-head"><h2>Strategic recommendations <span class="muted">(${lpRecs.length} open)</span></h2><a href="#/inbox" class="muted" style="font-size:12px">all recommendations →</a></div>
+        <div class="grid-2">${lpRecs.map((r) => V2.recCard(r, { showProject: true, projects })).join("") || `<div class="empty">Nothing open. The landing page agent's strategic actions (prioritise, rewrite, test, retire) land here after each run.</div>`}</div>
       </div>`;
     document.getElementById("add-lp").addEventListener("click", () => {
       if (!projects.length) { alert("Create a project first."); return; }
@@ -219,16 +490,19 @@ window.V2 = window.V2 || { tabs: {} };
     $view.querySelectorAll("[data-proj]").forEach((b) => b.addEventListener("click", () => V2.renderLandingPages(days, { ...filter, project: b.dataset.proj || null })));
     $view.querySelectorAll("[data-st]").forEach((b) => b.addEventListener("click", () => V2.renderLandingPages(days, { ...filter, status: b.dataset.st || null })));
     bindTable($view, shown, rerender);
+    bindBacklog($view, backlog, "global", rerender);
     V2.bindRecCards($view, lpRecs, rerender);
   };
 
   /* ── project tab ── */
   V2.tabs.landing = async function (id, p, root, days) {
     days = Number(days) || 30;
-    const [perf, recs, agents] = await Promise.all([
+    const [perf, recs, agents, pages, comps] = await Promise.all([
       api(`/api/landing-pages/performance?project_id=${id}&days=${days}`),
       api(`/api/recommendations?project_id=${id}&status=open`),
       api(`/api/agents?project_id=${id}`),
+      api(`/api/landing-pages?project_id=${id}`),
+      api(`/api/competitors?project_id=${id}`),
     ]);
     const lpRecs = recs.filter((r) => r.kind === "landing_page");
     const agent = agents.find((a) => a.kind === "landing_pages" && a.project_id === id);
@@ -240,26 +514,29 @@ window.V2 = window.V2 || { tabs: {} };
             ${agent ? `<button class="btn btn-sm" id="run-lp-agent">Run landing page agent</button>` : `<button class="btn btn-sm" id="add-lp-agent">Add landing page agent</button>`}
             <button class="btn btn-sm btn-primary" id="add-lp">+ Landing page</button></span></div>
         <div id="lp-agent-status"></div>
-        ${V2.landingTable(perf, { project: p }) || `<div class="empty">No landing pages for ${esc(p.name)} yet.<br><span class="muted" style="font-size:12px">Register the pages you already have (path = what you send as <code>properties.path</code> on <code>visit</code> events), then let the agent suggest new ones.</span></div>`}
+        ${V2.landingTable(perf, { project: p }) || `<div class="empty">No live or draft landing pages for ${esc(p.name)} yet.<br><span class="muted" style="font-size:12px">Register the pages you already have (path = what you send as <code>properties.path</code> on <code>visit</code> events), then let the agent fill the backlog below.</span></div>`}
         ${discoveredList(perf, false)}
-        <div class="section-head" style="margin-top:24px"><h3>Page suggestions <span class="muted">(${lpRecs.length} open)</span></h3></div>
-        <div class="grid-2">${lpRecs.map((r) => V2.recCard(r)).join("") || `<div class="muted" style="font-size:12px">Nothing open. ${agent ? "Run the landing page agent for suggestions grounded in the wiki, keywords and this table." : "Add the landing page agent to get suggestions."}</div>`}</div>
-      </div>`;
+      </div>
+      ${V2.backlogSection(pages, { key: id, hasAgent: !!agent })}
+      <div class="section" style="margin-top:24px">
+        <div class="section-head"><h2>Strategic recommendations <span class="muted">(${lpRecs.length} open)</span></h2></div>
+        <div class="grid-2">${lpRecs.map((r) => V2.recCard(r)).join("") || `<div class="muted" style="font-size:12px">Nothing open. ${agent ? "Each agent run adds ideas to the backlog and 3–6 strategic actions (prioritise, rewrite, test, retire) here." : "Add the landing page agent to get ideas and recommendations."}</div>`}</div>
+      </div>
+      ${V2.competitorsSection(comps)}`;
     document.getElementById("add-lp").addEventListener("click", () => V2.landingModal(id, null, rerender));
     root.querySelectorAll("[data-days]").forEach((b) => b.addEventListener("click", () => { location.hash = `#/p/${id}/landing/${b.dataset.days}`; }));
     const run = document.getElementById("run-lp-agent");
     if (run) run.addEventListener("click", async () => {
       const status = document.getElementById("lp-agent-status");
       run.textContent = "Running…"; run.disabled = true;
-      status.innerHTML = `<div class="notice">Landing page agent is reading the wiki, keywords and this table… usually 20–60s.</div>`;
+      status.innerHTML = `<div class="notice">Landing page agent is researching competitors, reading the wiki + keywords and generating a batch of page ideas… usually 1–3 minutes.</div>`;
       let result;
       try { result = await api(`/api/agents/${agent.id}/run`, { method: "POST" }); }
       catch (ex) { status.innerHTML = `<div class="notice">Run failed: ${esc(ex.message)}</div>`; run.textContent = "Run landing page agent"; run.disabled = false; return; }
-      const after = await api(`/api/recommendations?project_id=${id}&status=open`);
-      const fresh = after.filter((r) => r.kind === "landing_page").length - lpRecs.length;
       await rerender();
       const s = document.getElementById("lp-agent-status");
-      if (s) s.innerHTML = `<div class="notice">Run ${esc(result.status)}${result.error ? ` — ${esc(result.error)}` : ""}: ${fresh > 0 ? `<b>${fresh} new page suggestion${fresh === 1 ? "" : "s"}</b> below` : "no new page suggestions"}${result.summary ? ` — ${esc(result.summary.replace(/\.$/, ""))}` : ""}. <a href="#/p/${id}/agents">Run history →</a></div>`;
+      const lead = esc((result.summary || "").split("\n")[0]).replace(/^_(.+?)\._$/, "<b>$1</b>.");
+      if (s) s.innerHTML = `<div class="notice">Run ${esc(result.status)}${result.error ? ` — ${esc(result.error)}` : ""}${lead ? `: ${lead}` : ""} New ideas are in the <a href="#bl-${id}">backlog</a>; strategic actions below. <a href="#/p/${id}/agents">Run history →</a></div>`;
     });
     const add = document.getElementById("add-lp-agent");
     if (add) add.addEventListener("click", async () => {
@@ -267,6 +544,8 @@ window.V2 = window.V2 || { tabs: {} };
       rerender();
     });
     bindTable(root, perf, rerender);
+    bindBacklog(root, pages, id, rerender);
+    bindCompetitors(root, comps, id, rerender);
     V2.bindRecCards(root, lpRecs, rerender);
   };
 })();

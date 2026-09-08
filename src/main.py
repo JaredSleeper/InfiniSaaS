@@ -8,6 +8,7 @@ from src import scheduler
 from src.api import (
     agents,
     campaigns,
+    competitors,
     devin,
     events,
     experiments,
@@ -96,6 +97,7 @@ app.include_router(product.seo_keywords, prefix="/api/seo/keywords", dependencie
 app.include_router(seo.router, prefix="/api/seo", dependencies=auth)
 app.include_router(landing.perf_router, prefix="/api/landing-pages", dependencies=auth)
 app.include_router(landing.router, prefix="/api/landing-pages", dependencies=auth)
+app.include_router(competitors.router, prefix="/api/competitors", dependencies=auth)
 app.include_router(devin.router, prefix="/api/devin", dependencies=auth)
 app.include_router(agents.router, prefix="/api/agents", dependencies=auth)
 app.include_router(agents.recs_router, prefix="/api/recommendations", dependencies=auth)

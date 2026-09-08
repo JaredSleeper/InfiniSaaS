@@ -8,7 +8,7 @@ from uuid import UUID
 
 import structlog
 
-from src.agents import llm, seo_audit
+from src.agents import landing_agent, llm, seo_audit
 from src.api.events import analytics_summary
 from src.api.finance import finance_summary
 from src.api.landing import landing_performance
@@ -237,8 +237,19 @@ async def _landing_context(project_id: UUID) -> dict:
            ORDER BY impressions DESC NULLS LAST, clicks DESC NULLS LAST LIMIT 40""",
         project_id,
     )
+    # The backlog can be hundreds of rows and is excluded from the performance table;
+    # the ideas call gets the compact list, the strategic call only the counts.
+    backlog = {
+        r["status"]: r["n"]
+        for r in await pool.fetch(
+            """SELECT status, count(*) AS n FROM landing_pages
+               WHERE project_id = $1 AND status IN ('idea', 'vetted', 'rejected')
+               GROUP BY status""",
+            project_id,
+        )
+    }
     pages = []
-    for row in perf.pages:
+    for row in perf.pages[:80]:
         page = row.page
         pages.append(
             {
@@ -246,6 +257,9 @@ async def _landing_context(project_id: UUID) -> dict:
                 "path": page.path,
                 "url": page.url,
                 "status": page.status,
+                "page_type": page.page_type,
+                "cluster": page.cluster,
+                "score": page.score,
                 "channel": page.channel,
                 "headline": page.headline,
                 "angle": page.angle,
@@ -269,6 +283,7 @@ async def _landing_context(project_id: UUID) -> dict:
     return {
         "window_days": perf.days,
         "pages": pages,
+        "backlog_counts": backlog,
         "unregistered_paths_with_traffic": [
             {"path": d.path, "pageviews": d.pageviews, "visitors": d.visitors}
             for d in perf.discovered
@@ -306,6 +321,13 @@ async def build_context(agent: dict) -> dict:
         ctx["analytics"] = await analytics_summary(project_id, 30)
         ctx["analytics"].pop("series", None)
     elif kind == "landing_pages":
+        ctx["research"] = await landing_agent.refresh_research(project_id, agent)
+        ctx["competitors"] = await landing_agent.competitor_context(project_id)
+        notes = (config.get("research_state") or {}).get("market_notes") or ctx["research"].get(
+            "market_notes"
+        )
+        if notes:
+            ctx["market_notes"] = notes
         ctx["landing_pages"] = await _landing_context(project_id)
         ctx["analytics"] = await analytics_summary(project_id, 30)
         ctx["analytics"].pop("series", None)
@@ -321,14 +343,14 @@ def _prompt_for(agent: dict, ctx: dict) -> str:
         "recommend budget shifts, new platforms/tests, or pausing what doesn't work.",
         "analytics": "Act as a product analyst. Read the funnel and event data, find the biggest "
         "drop-off, and propose experiments to fix it.",
-        "landing_pages": "Act as a conversion + acquisition strategist for landing pages. Compare "
-        "the pages in context (visitors, signup/pay rates, Search Console clicks/CTR, paid CPA, "
-        "SEO score). Propose: new pages for underserved keywords or ICP segments from the wiki "
-        "(kind landing_page with a full page object: path, headline, angle, target_keyword, "
-        "channel), headline/angle tests on the best-trafficked pages (kind experiment), and "
-        "rewrites or retirement of pages that get traffic but don't convert. Paths with traffic "
-        "that aren't registered as landing pages are candidates to track. Be specific about "
-        "the promise each page makes and which metric proves it worked.",
+        "landing_pages": "Act as a conversion + acquisition strategist for landing pages. A "
+        "separate step has already added a batch of new page ideas to the backlog "
+        "(see ideas_added) — do NOT propose individual new pages here. Instead, give the 3-6 "
+        "highest-leverage actions: which clusters/page types to prioritise building from the "
+        "backlog and why (competitor gaps, keyword demand), headline/angle tests on the "
+        "best-trafficked live pages (kind experiment), rewrites or retirement of pages that get "
+        "traffic but don't convert, and paths with traffic that should be tracked. Cite "
+        "visitors, signup/pay rates, Search Console clicks/CTR, CPA and competitor evidence.",
         "custom": "Follow the agent instructions in the context.",
     }[agent["kind"]]
     instr = agent["instructions"].strip()
@@ -361,9 +383,21 @@ async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
     run_id = run["id"]
     try:
         ctx = await build_context(agent)
+        ideas: dict | None = None
+        if agent["kind"] == "landing_pages" and agent["project_id"] is not None:
+            ideas = await landing_agent.generate_ideas(agent, ctx, run_id)
+            ctx["ideas_added"] = {k: ideas[k] for k in ("requested", "inserted")}
         result = await llm.complete(SYSTEM, _prompt_for(agent, ctx))
         parsed = llm.extract_json(result.text) or {}
         summary = parsed.get("summary") or result.text[:2000]
+        if ideas:
+            research = ctx.get("research") or {}
+            bits = [f"{ideas['inserted']} new page ideas added to the backlog"]
+            if research.get("discovered"):
+                bits.append(f"{research['discovered']} competitors discovered")
+            if research.get("crawled"):
+                bits.append(f"{research['crawled']} competitor sites crawled")
+            summary = f"_{', '.join(bits)}._\n\n{summary}"
         recs = []
         for r in parsed.get("recommendations", [])[:6]:
             if not isinstance(r, dict) or not r.get("title"):
@@ -395,9 +429,19 @@ async def run_agent(agent_id: UUID, trigger: str = "manual") -> UUID:
                    context = $3, input_tokens = $4, output_tokens = $5 WHERE id = $1""",
                 run_id,
                 summary,
-                {"keys": list(ctx), "mock": result.mock, "recommendations": len(recs)},
-                result.input_tokens,
-                result.output_tokens,
+                {
+                    "keys": list(ctx),
+                    "mock": result.mock,
+                    "recommendations": len(recs),
+                    "ideas": ideas,
+                    "research": ctx.get("research"),
+                },
+                result.input_tokens
+                + (ideas or {}).get("input_tokens", 0)
+                + (ctx.get("research") or {}).get("input_tokens", 0),
+                result.output_tokens
+                + (ideas or {}).get("output_tokens", 0)
+                + (ctx.get("research") or {}).get("output_tokens", 0),
             )
             await conn.execute("UPDATE agents SET last_run_at = now() WHERE id = $1", agent_id)
         if agent["kind"] == "weekly_brief" and not result.mock:

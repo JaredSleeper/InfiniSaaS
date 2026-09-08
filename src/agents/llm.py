@@ -23,15 +23,25 @@ def configured() -> bool:
     return bool(settings.anthropic_api_key)
 
 
-async def complete(system: str, prompt: str, max_tokens: int = 4000) -> LLMResult:
+async def complete(
+    system: str, prompt: str, max_tokens: int = 4000, web_searches: int = 0
+) -> LLMResult:
+    """One-shot completion. ``web_searches`` > 0 enables Anthropic's server-side web search
+    tool (bounded by that many searches) so the model can ground itself in live results."""
     if not configured():
         return LLMResult(text=_mock_response(prompt), input_tokens=0, output_tokens=0, mock=True)
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    kwargs: dict = {}
+    if web_searches > 0:
+        kwargs["tools"] = [
+            {"type": "web_search_20250305", "name": "web_search", "max_uses": web_searches}
+        ]
     resp = await client.messages.create(
         model=settings.default_llm_model,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": prompt}],
+        **kwargs,
     )
     text = "".join(block.text for block in resp.content if getattr(block, "type", "") == "text")
     return LLMResult(
@@ -42,17 +52,23 @@ async def complete(system: str, prompt: str, max_tokens: int = 4000) -> LLMResul
 
 
 def extract_json(text: str) -> dict | None:
-    """Pull the first JSON object out of a model response (handles ```json fences)."""
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-    candidates = [fenced.group(1)] if fenced else []
-    start = text.find("{")
-    if start != -1:
-        candidates.append(text[start : text.rfind("}") + 1])
-    for c in candidates:
+    """Pull the JSON object out of a model response (handles ```json fences and prose
+    around it; with web search the answer is often the *last* object, after citations)."""
+    fences = re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    candidates = [m.group(1) for m in fences]
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start : end + 1])
+        # Prose before the object may itself contain braces; retry from each later '{'.
+        for m in re.finditer(r"\{", text[start + 1 : end], re.DOTALL):
+            candidates.append(text[start + 1 + m.start() : end + 1])
+    for c in candidates[:40]:
         try:
-            return json.loads(c)
+            out = json.loads(c)
         except json.JSONDecodeError:
             continue
+        if isinstance(out, dict):
+            return out
     return None
 
 
