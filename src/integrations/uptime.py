@@ -13,6 +13,11 @@ from src.errors import safe_error
 log = structlog.get_logger()
 
 
+def probe_url(url: str) -> str:
+    url = url.strip()
+    return url if url.startswith(("http://", "https://")) else f"https://{url}"
+
+
 async def check_all() -> int:
     pool = await get_pool()
     projects = await pool.fetch(
@@ -23,7 +28,9 @@ async def check_all() -> int:
         for p in projects:
             t0 = time.monotonic()
             try:
-                r = await client.get(p["url"], headers={"User-Agent": "infinisaas-uptime/1.0"})
+                r = await client.get(
+                    probe_url(p["url"]), headers={"User-Agent": "infinisaas-uptime/1.0"}
+                )
                 ms = int((time.monotonic() - t0) * 1000)
                 results.append((p["id"], r.status_code, ms, r.status_code < 400, ""))
             except Exception as exc:  # noqa: BLE001
