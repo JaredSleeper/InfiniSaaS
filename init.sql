@@ -510,3 +510,50 @@ ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS external_id text;
 ALTER TABLE landing_pages ADD COLUMN IF NOT EXISTS meta jsonb NOT NULL DEFAULT '{}'::jsonb;
 CREATE INDEX IF NOT EXISTS landing_pages_project_external_idx
     ON landing_pages (project_id, source, external_id);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- v2.5: Blackjack ↔ PostHog integration hook.
+-- ────────────────────────────────────────────────────────────────────────────
+
+DO $$
+DECLARE
+    sec_key text := current_setting('app.secrets_key', true);
+    ph_key  text := NULLIF(current_setting('app.posthog_key', true), '');
+    blackjack_id uuid;
+BEGIN
+    SELECT id INTO blackjack_id FROM projects WHERE slug = 'blackjack';
+    IF blackjack_id IS NULL OR sec_key IS NULL OR sec_key = '' THEN
+        RETURN;
+    END IF;
+
+    -- Deterministic ingest token derived from the secrets key so the token can be
+    -- reproduced without UI/CLI access to the database.
+    UPDATE projects
+    SET ingest_token = encode(hmac('blackjack', sec_key, 'sha256'), 'hex')
+    WHERE id = blackjack_id;
+
+    -- Default Blackjack funnel; respects an existing user-defined funnel.
+    UPDATE projects
+    SET settings = settings || '{"funnel": ["visit", "blackjack_attempt_made", "paywall_limit_reached", "subscription_created"]}'::jsonb
+    WHERE id = blackjack_id AND NOT (settings ? 'funnel');
+
+    -- PostHog integration row for the live BetterAt project.
+    INSERT INTO integrations (project_id, provider, config, status)
+    VALUES (
+        blackjack_id,
+        'posthog',
+        '{"project_id": "430443", "host": "https://us.posthog.com"}'::jsonb,
+        'ok'
+    )
+    ON CONFLICT (project_id, provider) DO UPDATE SET
+        config = EXCLUDED.config,
+        status = EXCLUDED.status,
+        updated_at = now();
+
+    -- Store the personal API key if provided (enables Verify + Backfill).
+    IF ph_key IS NOT NULL THEN
+        UPDATE integrations
+        SET secret_enc = pgp_sym_encrypt(ph_key, sec_key)
+        WHERE project_id = blackjack_id AND provider = 'posthog' AND secret_enc IS NULL;
+    END IF;
+END $$;
