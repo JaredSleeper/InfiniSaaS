@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import httpx
@@ -199,7 +200,14 @@ async def test_landing_agent_context_and_rec_to_page(client, project, clean, mon
 
     monkeypatch.setattr(runner.llm, "complete", fake_complete)
     r = await client.post(f"/api/agents/{agent['id']}/run")
-    assert r.status_code == 201 and r.json()["status"] == "succeeded", r.text
+    assert r.status_code == 202 and r.json()["status"] == "running", r.text
+    run = r.json()
+    for _ in range(100):
+        run = (await client.get(f"/api/agents/runs/{run['id']}")).json()
+        if run["status"] != "running":
+            break
+        await asyncio.sleep(0.05)
+    assert run["status"] == "succeeded", run
     recs = (await client.get(f"/api/recommendations?project_id={project['id']}&status=open")).json()
     rec = next(x for x in recs if x["title"] == "Build a WPM calculator page")
     assert rec["kind"] == "landing_page"

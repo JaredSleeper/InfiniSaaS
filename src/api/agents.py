@@ -116,10 +116,11 @@ async def delete_agent(agent_id: UUID) -> None:
     await pool.execute("DELETE FROM agents WHERE id = $1", agent_id)
 
 
-@router.post("/{agent_id}/run", response_model=AgentRunOut, status_code=201)
+@router.post("/{agent_id}/run", response_model=AgentRunOut, status_code=202)
 async def run_now(agent_id: UUID) -> AgentRunOut:
+    """Start a run and return it immediately (status 'running'); poll GET /runs/{run_id}."""
     await fetch_one("agents", agent_id)
-    run_id = await runner.run_agent(agent_id, trigger="manual")
+    run_id = await runner.run_agent(agent_id, trigger="manual", wait=False)
     return AgentRunOut(**await fetch_one("agent_runs", run_id))
 
 
@@ -149,6 +150,11 @@ async def recent_runs(
         limit,
     )
     return [AgentRunOut(**dict(r)) for r in rows]
+
+
+@router.get("/runs/{run_id}", response_model=AgentRunOut)
+async def get_run(run_id: UUID) -> AgentRunOut:
+    return AgentRunOut(**await fetch_one("agent_runs", run_id))
 
 
 # --- recommendations -------------------------------------------------------

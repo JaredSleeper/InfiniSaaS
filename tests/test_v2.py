@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -7,6 +8,8 @@ import httpx
 import pytest
 from asgi_lifespan import LifespanManager
 
+from src.agents import runner
+from src.db import get_pool
 from src.main import app
 
 
@@ -365,9 +368,19 @@ async def test_agents_bootstrap_and_mock_run(client, project):
     assert {a["kind"] for a in agents} >= {"weekly_brief", "seo", "analytics", "ads"}
     brief = next(a for a in agents if a["kind"] == "analytics")
     r = await client.post(f"/api/agents/{brief['id']}/run")
-    assert r.status_code == 201, r.text
+    assert r.status_code == 202, r.text
     run = r.json()
+    assert run["status"] == "running" and run["trigger"] == "manual", run
+    for _ in range(100):
+        run = (await client.get(f"/api/agents/runs/{run['id']}")).json()
+        if run["status"] != "running":
+            break
+        await asyncio.sleep(0.05)
     assert run["status"] == "succeeded", run
+    assert run["finished_at"] and run["summary"]
+    latest = (await client.get(f"/api/agents/{brief['id']}/runs?limit=1")).json()
+    assert latest[0]["id"] == run["id"]
+    assert (await client.get(f"/api/agents/runs/{uuid4()}")).status_code == 404
     recs = (await client.get(f"/api/recommendations?project_id={project['id']}")).json()
     assert recs
     rec = recs[0]
@@ -376,6 +389,29 @@ async def test_agents_bootstrap_and_mock_run(client, project):
     assert r.json()["experiment_id"] and r.json()["status"] == "accepted"
     r = await client.patch(f"/api/recommendations/{rec['id']}", json={"status": "done"})
     assert r.json()["status"] == "done"
+
+
+async def test_stale_running_runs_are_failed(client, project):
+    agents = (await client.post(f"/api/agents/bootstrap/{project['id']}")).json()
+    agent = next(a for a in agents if a["kind"] == "ads")
+    pool = await get_pool()
+    stale = await pool.fetchval(
+        """INSERT INTO agent_runs (agent_id, status, trigger, started_at)
+           VALUES ($1, 'running', 'manual', now() - interval '31 minutes') RETURNING id""",
+        UUID(agent["id"]),
+    )
+    fresh = await pool.fetchval(
+        """INSERT INTO agent_runs (agent_id, status, trigger, started_at)
+           VALUES ($1, 'running', 'manual', now() - interval '1 minute') RETURNING id""",
+        UUID(agent["id"]),
+    )
+    try:
+        assert await runner.fail_stale_runs() == 1
+        r = (await client.get(f"/api/agents/runs/{stale}")).json()
+        assert r["status"] == "failed" and "30 minutes" in r["error"] and r["finished_at"]
+        assert (await client.get(f"/api/agents/runs/{fresh}")).json()["status"] == "running"
+    finally:
+        await pool.execute("DELETE FROM agent_runs WHERE id = ANY($1::uuid[])", [stale, fresh])
 
 
 async def test_seo_keywords_and_content(client, project):
