@@ -161,6 +161,46 @@ UPDATE projects
 SET settings = settings || '{"funnel": ["visit", "signup_completed", "monitor_created", "delivery_sent"]}'::jsonb
 WHERE slug = 'situationmonitor' AND NOT (settings ? 'funnel');
 
+-- Keep the canonical PageDrones URL up to date if it was never set.
+UPDATE projects
+SET url = 'https://pagedrones.com'
+WHERE slug = 'situationmonitor' AND url IS NULL;
+
+-- Wire the speedreading project to the same BetterAt PostHog project as blackjack
+-- (BetterAt sends blackjack + speed-reading + holdem events to one PostHog project).
+-- Secret is copied from the blackjack integration so verify/backfill work with one key.
+INSERT INTO integrations (project_id, provider, config, status, secret_enc)
+SELECT sp.id, 'posthog', COALESCE(bi.config, '{"project_id": "430443", "host": "https://us.posthog.com"}'::jsonb), 'ok', bi.secret_enc
+FROM projects sp
+LEFT JOIN LATERAL (
+    SELECT i.config, i.secret_enc
+    FROM projects bp
+    JOIN integrations i ON i.project_id = bp.id AND i.provider = 'posthog'
+    WHERE bp.slug = 'blackjack'
+    LIMIT 1
+) bi ON true
+WHERE sp.slug = 'speedreading'
+ON CONFLICT (project_id, provider) DO NOTHING;
+
+-- One-time cleanup: speed-reading PostHog events were landing under the blackjack project.
+-- Move them to the speedreading project so historical analytics line up.
+DO $$
+DECLARE
+    bj uuid;
+    sr uuid;
+BEGIN
+    SELECT id INTO bj FROM projects WHERE slug = 'blackjack';
+    SELECT id INTO sr FROM projects WHERE slug = 'speedreading';
+    IF bj IS NULL OR sr IS NULL THEN
+        RETURN;
+    END IF;
+    UPDATE events
+    SET project_id = sr
+    WHERE project_id = bj
+      AND source = 'posthog'
+      AND properties->>'path' LIKE '/speed-reading%';
+END $$;
+
 CREATE TABLE IF NOT EXISTS costs (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id   uuid REFERENCES projects(id) ON DELETE CASCADE,
