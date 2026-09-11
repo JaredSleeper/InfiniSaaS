@@ -18,9 +18,16 @@ window.__getAuthToken = window.__getAuthToken || (async () => null);
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json" };
   const token = await window.__getAuthToken();
+  const authed = window.INFINI && window.INFINI.authEnabled;
+  if (!token && authed && window.__signIn) {
+    window.__signIn();
+    throw new Error(window.__authError
+      ? `Clerk did not issue a session token: ${window.__authError}`
+      : "Sign in required");
+  }
   if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(path, { headers, ...opts });
-  if (res.status === 401 && window.INFINI && window.INFINI.authEnabled && window.__signIn) {
+  if (res.status === 401 && authed && window.__signIn) {
     window.__signIn();
     throw new Error("Sign in required");
   }
