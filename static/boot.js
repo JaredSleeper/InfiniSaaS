@@ -17,11 +17,23 @@
 
   async function bootWithClerk() {
     await window.Clerk.load();
-    window.__getAuthToken = async () => (window.Clerk.session ? window.Clerk.session.getToken() : null);
+    /* getToken() rejects (or returns null) when the session expired or Clerk cannot mint a
+       token — e.g. a broken "Customize session token" template. Surface that instead of
+       sending unauthenticated requests. */
+    window.__getAuthToken = async () => {
+      if (!window.Clerk.session) return null;
+      try {
+        return await window.Clerk.session.getToken();
+      } catch (ex) {
+        window.__authError = ex && ex.message ? ex.message : String(ex);
+        return null;
+      }
+    };
     window.__signIn = showSignIn;
     if (!window.Clerk.user) { showSignIn(); return; }
     window.Clerk.mountUserButton(document.getElementById("user-button"));
-    window.Clerk.addListener(({ user }) => { if (!user) location.reload(); });
+    /* Render the sign-in card in place; reloading here loops forever when the session is gone. */
+    window.Clerk.addListener(({ user }) => { if (!user) showSignIn(); });
     render();
   }
 
