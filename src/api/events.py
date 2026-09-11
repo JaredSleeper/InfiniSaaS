@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
-from collections import defaultdict
 from typing import Any
-from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Header, HTTPException, Query
@@ -45,98 +42,6 @@ async def ingest_events(body: EventsRequest, authorization: str = Header(default
     return {"accepted": len(body.events)}
 
 
-def _event_url_parts(raw: dict) -> tuple[str | None, str]:
-    """Return (host, path) for a raw PostHog event, normalising www. hosts."""
-    props = raw.get("properties") or {}
-    if isinstance(props, str):
-        try:
-            props = json.loads(props)
-        except ValueError:
-            props = {}
-    if not isinstance(props, dict):
-        props = {}
-
-    path = props.get("$pathname")
-    current_url = props.get("$current_url")
-    host: str | None = None
-
-    if current_url:
-        try:
-            parsed = urlparse(str(current_url))
-            host = (parsed.hostname or "").lower()
-            path = parsed.path or "/"
-        except ValueError:
-            pass
-
-    if host:
-        host = host.removeprefix("www.")
-    if not path:
-        path = "/"
-    return host, path
-
-
-def _url_match_score(host: str | None, path: str, project_url: str) -> int:
-    """Score how well an event matches a project's URL; 0 means no match."""
-    if not project_url:
-        return 0
-    if "://" not in project_url:
-        project_url = "https://" + project_url
-    try:
-        parsed = urlparse(project_url)
-    except ValueError:
-        return 0
-
-    candidate_host = (parsed.hostname or "").lower().removeprefix("www.")
-    if host and host != candidate_host:
-        return 0
-
-    candidate_path = (parsed.path or "/").rstrip("/")
-    if path == candidate_path or path.startswith(candidate_path + "/"):
-        return len(candidate_path)
-    return 0
-
-
-async def _posthog_routes(token_project_id: UUID) -> list[dict]:
-    """Return cockpit projects sharing the same PostHog project as the token project."""
-    pool = await get_pool()
-    token_int = await pool.fetchrow(
-        "SELECT config FROM integrations WHERE project_id = $1 AND provider = 'posthog'",
-        token_project_id,
-    )
-    if token_int is None:
-        return []
-    ph_project_id = (token_int.get("config") or {}).get("project_id")
-    if not ph_project_id:
-        return []
-    rows = await pool.fetch(
-        """
-        SELECT p.id, p.url, p.slug
-        FROM integrations i
-        JOIN projects p ON p.id = i.project_id
-        WHERE i.provider = 'posthog'
-          AND i.config->>'project_id' = $1
-        ORDER BY p.url DESC NULLS LAST
-        """,
-        str(ph_project_id),
-    )
-    return [dict(r) for r in rows]
-
-
-def _resolve_target(raw: dict, token_project_id: UUID, routes: list[dict]) -> UUID:
-    """Route a PostHog event to the cockpit project whose URL it belongs to."""
-    if not routes:
-        return token_project_id
-    host, path = _event_url_parts(raw)
-    best_score = 0
-    best_id = token_project_id
-    for route in routes:
-        score = _url_match_score(host, path, route.get("url") or "")
-        if score > best_score:
-            best_score = score
-            best_id = route["id"]
-    return best_id
-
-
 @ingest_router.post("/posthog", status_code=202)
 async def ingest_posthog(body: Any = Body(...), authorization: str = Header(default="")) -> dict:
     """Target for a PostHog webhook destination (default body `{event, person}`).
@@ -152,22 +57,7 @@ async def ingest_posthog(body: Any = Body(...), authorization: str = Header(defa
     raws = posthog.unwrap_payload(body)
     if len(raws) > 1000:
         raise HTTPException(status_code=413, detail="Max 1000 events per request")
-
-    routes = await _posthog_routes(project_id)
-    if not routes:
-        accepted, skipped = await posthog.store_events(project_id, raws)
-        return {"accepted": accepted, "skipped": skipped}
-
-    groups: dict[UUID, list[dict]] = defaultdict(list)
-    for raw in raws:
-        target = _resolve_target(raw, project_id, routes)
-        groups[target].append(raw)
-
-    accepted = skipped = 0
-    for pid, batch in groups.items():
-        a, s = await posthog.store_events(pid, batch)
-        accepted += a
-        skipped += s
+    accepted, skipped = await posthog.store_events_routed(project_id, raws)
     return {"accepted": accepted, "skipped": skipped}
 
 
