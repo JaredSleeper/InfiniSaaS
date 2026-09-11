@@ -196,7 +196,12 @@ async def shared_routes(project_id: UUID) -> list[dict]:
         """,
         str(ph_project_id),
     )
-    return [dict(r) for r in rows]
+    routes = [dict(r) for r in rows]
+    # Unmatched events (site root, /account, etc.) need a deterministic home that
+    # doesn't depend on which project's token/integration triggered the call:
+    # prefer the project rooted at the shared host, else the first slug.
+    routes.sort(key=lambda r: (len(urlparse(r.get("url") or "").path.rstrip("/")), r["slug"]))
+    return routes
 
 
 def resolve_target(raw: dict, token_project_id: UUID, routes: list[dict]) -> UUID:
@@ -205,7 +210,7 @@ def resolve_target(raw: dict, token_project_id: UUID, routes: list[dict]) -> UUI
         return token_project_id
     host, path = _event_url_parts(raw)
     best_score = 0
-    best_id = token_project_id
+    best_id = routes[0]["id"]
     for route in routes:
         score = _url_match_score(host, path, route.get("url") or "")
         if score > best_score:
