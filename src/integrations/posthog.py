@@ -152,14 +152,25 @@ def _event_url_parts(raw: dict) -> tuple[str | None, str]:
     return host, path
 
 
-def _url_match_score(host: str | None, path: str, project_url: str) -> int:
-    """Score how well an event matches a project's URL; 0 means no match."""
-    if not project_url:
+def _route_paths(route: dict) -> list[str]:
+    """URL path prefixes a route claims: the project URL plus any path_aliases."""
+    url = route.get("url") or ""
+    if "://" not in url:
+        url = "https://" + url
+    base = (urlparse(url).path or "/").rstrip("/")
+    aliases = (route.get("settings") or {}).get("path_aliases") or []
+    return [base] + [str(a).rstrip("/") for a in aliases]
+
+
+def _url_match_score(host: str | None, path: str, route: dict) -> int:
+    """Score how well an event matches a project's URL paths; 0 means no match."""
+    if not route.get("url"):
         return 0
-    if "://" not in project_url:
-        project_url = "https://" + project_url
+    url = route["url"]
+    if "://" not in url:
+        url = "https://" + url
     try:
-        parsed = urlparse(project_url)
+        parsed = urlparse(url)
     except ValueError:
         return 0
 
@@ -167,10 +178,15 @@ def _url_match_score(host: str | None, path: str, project_url: str) -> int:
     if host and host != candidate_host:
         return 0
 
-    candidate_path = (parsed.path or "/").rstrip("/")
-    if path == candidate_path or path.startswith(candidate_path + "/"):
-        return len(candidate_path)
-    return 0
+    best = 0
+    for candidate_path in _route_paths(route):
+        if path == candidate_path or path.startswith(candidate_path + "/"):
+            best = max(best, len(candidate_path))
+    return best
+
+
+def _norm_slug(slug: str) -> str:
+    return "".join(c for c in slug.lower() if c.isalnum())
 
 
 async def shared_routes(project_id: UUID) -> list[dict]:
@@ -187,7 +203,7 @@ async def shared_routes(project_id: UUID) -> list[dict]:
         return []
     rows = await pool.fetch(
         """
-        SELECT p.id, p.url, p.slug
+        SELECT p.id, p.url, p.slug, p.settings
         FROM integrations i
         JOIN projects p ON p.id = i.project_id
         WHERE i.provider = 'posthog'
@@ -208,11 +224,24 @@ def resolve_target(raw: dict, token_project_id: UUID, routes: list[dict]) -> UUI
     """Route a PostHog event to the cockpit project whose URL it belongs to."""
     if not routes:
         return token_project_id
+    # Explicit attribution (e.g. server-side subscription_created/pay carry app_slug
+    # but no URL) beats path inference.
+    props = raw.get("properties") or {}
+    if isinstance(props, str):
+        try:
+            props = json.loads(props)
+        except ValueError:
+            props = {}
+    app_hint = props.get("app_slug") or props.get("app")
+    if app_hint:
+        for route in routes:
+            if _norm_slug(str(app_hint)) == _norm_slug(route.get("slug") or ""):
+                return route["id"]
     host, path = _event_url_parts(raw)
     best_score = 0
     best_id = routes[0]["id"]
     for route in routes:
-        score = _url_match_score(host, path, route.get("url") or "")
+        score = _url_match_score(host, path, route)
         if score > best_score:
             best_score = score
             best_id = route["id"]
