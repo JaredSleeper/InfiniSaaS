@@ -469,3 +469,47 @@ async def test_scheduler_leadership_is_exclusive(client):
     finally:
         await leader.execute("SELECT pg_advisory_unlock($1)", scheduler.LEADER_LOCK_ID)
         await (await get_pool()).release(leader)
+
+
+async def test_posthog_shared_project_routing(client, project):
+    """Shared BetterAt PostHog project: path aliases, app_slug, and deterministic fallback."""
+    projects = (await client.get("/api/projects")).json()
+    speed = next(p for p in projects if p["slug"] == "speedreading")
+    for p in (project, speed):
+        r = await client.put(
+            "/api/integrations/posthog",
+            json={
+                "project_id": p["id"],
+                "config": {"project_id": "430443", "host": "us.posthog.com"},
+            },
+        )
+        assert r.status_code == 200, r.text
+    token = (await client.get(f"/api/projects/{project['id']}/ingest-token")).json()["ingest_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    ts = (datetime.now(UTC) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    def ev(props):
+        return {"event": {"uuid": str(uuid4()), "event": "$pageview",
+                          "distinct_id": "u1", "timestamp": ts, "properties": props}}
+
+    batch = [
+        ev({"$pathname": "/speedreading", "$current_url": "https://getbetterat.xyz/speedreading"}),
+        {"event": {"uuid": str(uuid4()), "event": "subscription_created", "distinct_id": "u1",
+                   "timestamp": ts, "properties": {"app_slug": "speed-reading", "tier": "pro"}}},
+        ev({"$pathname": "/", "$current_url": "https://getbetterat.xyz/"}),
+    ]
+    r = await client.post("/api/v1/posthog", json=batch, headers=headers)
+    assert r.status_code == 202 and r.json()["accepted"] == 3
+
+    speed_recent = (
+        await client.get(f"/api/analytics/recent?project_id={speed['id']}&limit=20")
+    ).json()
+    names = {e["name"] for e in speed_recent}
+    assert "subscription_created" in names
+    assert any(e["name"] == "visit" and e["properties"].get("path") == "/speedreading"
+               for e in speed_recent)
+
+    bj_recent = (
+        await client.get(f"/api/analytics/recent?project_id={project['id']}&limit=20")
+    ).json()
+    assert any(e["properties"].get("path") == "/" for e in bj_recent)

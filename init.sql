@@ -198,8 +198,22 @@ BEGIN
     SET project_id = sr
     WHERE project_id = bj
       AND source = 'posthog'
-      AND properties->>'path' LIKE '/speed-reading%';
+      AND (properties->>'path' LIKE '/speed-reading%'
+           OR properties->>'path' LIKE '/speedreading%'
+           OR properties->>'app_slug' IN ('speed-reading', 'speedreading')
+           OR properties->>'app' IN ('speed-reading', 'speedreading'));
 END $$;
+
+-- Speedreading funnel + path aliases (the marketing page lives at /speedreading,
+-- the app at /speed-reading) unless already customised.
+UPDATE projects
+SET settings = settings
+    || '{"funnel": ["visit", "speed_reading_attempt_made", "paywall_limit_reached", "subscription_created"]}'::jsonb
+WHERE slug = 'speedreading' AND NOT (settings ? 'funnel');
+UPDATE projects
+SET settings = settings
+    || '{"path_aliases": ["/speed-reading", "/speedreading"]}'::jsonb
+WHERE slug = 'speedreading' AND NOT (settings ? 'path_aliases');
 
 CREATE TABLE IF NOT EXISTS costs (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
