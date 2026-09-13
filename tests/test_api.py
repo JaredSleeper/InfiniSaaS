@@ -114,3 +114,20 @@ def test_uptime_probe_url_adds_scheme():
     assert probe_url("pagedrones.com") == "https://pagedrones.com"
     assert probe_url(" http://localhost:8020 ") == "http://localhost:8020"
     assert probe_url("https://getbetterat.xyz/blackjack") == "https://getbetterat.xyz/blackjack"
+
+
+def test_static_js_parses():
+    """A SyntaxError in static/v2-*.js silently breaks whole tabs at runtime."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not available")
+    static = Path(__file__).resolve().parent.parent / "static"
+    for path in sorted(static.glob("*.js")):
+        r = subprocess.run(
+            [node, "--check", str(path)], capture_output=True, text=True, check=False
+        )
+        assert r.returncode == 0, f"{path.name}: {r.stderr}"

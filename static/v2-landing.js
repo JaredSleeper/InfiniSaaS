@@ -19,6 +19,16 @@ window.V2 = window.V2 || { tabs: {} };
   };
   const scoreChip = (s) => s == null ? `<span class="muted">—</span>` : `<span class="score-chip" style="color:${scoreColor(s)}; border-color:${scoreColor(s)}">${s}</span>`;
   const typeLabel = (t) => String(t || "other").replace(/_/g, " ");
+  /* Ad spend cell: logged spend plus the utm-attributed paid funnel, when either exists. */
+  const adCell = (r) => {
+    if (r.ad_spend == null && r.paid_visitors == null) return "—";
+    const lines = [];
+    if (r.cpa != null) lines.push(`CPA ${money(r.cpa)}`);
+    if (r.ad_clicks != null) lines.push(`${num(r.ad_clicks)} clicks`);
+    if (r.paid_visitors != null) lines.push(`${num(r.paid_visitors)} paid visits · ${num(r.paid_signups)} signups`);
+    const head = r.ad_spend != null ? money(r.ad_spend) : "";
+    return `${head}<div class="muted" style="font-size:11px">${lines.join("<br>")}</div>`;
+  };
   const batchBadge = (p) => {
     const n = ((p.meta || {}).pagedrones_batches || []).length;
     return n ? ` <span class="badge" title="Alert batches generated in PageDrones from this theme (${n})">⚡ ${n} batch${n === 1 ? "" : "es"}</span>` : "";
@@ -112,11 +122,7 @@ window.V2 = window.V2 || { tabs: {} };
       <td class="mono" style="text-align:right">${num(r.signups)}<div style="font-size:11px; ${rateColor(r.signup_rate, 5, 2)}">${pct(r.signup_rate)}</div></td>
       <td class="mono" style="text-align:right">${num(r.pays)}<div style="font-size:11px; ${rateColor(r.pay_rate, 1, 0.3)}">${pct(r.pay_rate)}</div></td>
       <td class="mono" style="text-align:right">${r.gsc_clicks == null ? "—" : `${num(r.gsc_clicks)}<div class="muted" style="font-size:11px">${num(r.gsc_impressions)} impr · ${pct(r.gsc_ctr)}${r.gsc_position != null ? ` · #${Number(r.gsc_position).toFixed(1)}` : ""}</div>`}</td>
-      <td class="mono" style="text-align:right">${r.ad_spend == null && r.paid_visitors == null ? "—" : `${r.ad_spend != null ? money(r.ad_spend) : ""}<div class="muted" style="font-size:11px">${[
-        r.cpa != null ? `CPA ${money(r.cpa)}` : null,
-        r.ad_clicks != null ? `${num(r.ad_clicks)} clicks` : null,
-        r.paid_visitors != null ? `${num(r.paid_visitors)} paid visits · ${num(r.paid_signups)} signups` : null,
-      ].filter(Boolean).join("<br>")}`}</div>`}</td>
+      <td class="mono" style="text-align:right">${adCell(r)}</td>
       <td class="mono" style="text-align:right">${r.seo_score == null ? `<span class="muted">—</span>` : `<span style="color:${scoreColor(r.seo_score)}">${r.seo_score}</span>`}</td>
       <td style="text-align:right; white-space:nowrap">
         <button class="btn btn-sm btn-devin" data-lp-devin="${p.id}" title="Send to Devin">◆</button>
