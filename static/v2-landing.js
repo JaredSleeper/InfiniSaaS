@@ -112,7 +112,11 @@ window.V2 = window.V2 || { tabs: {} };
       <td class="mono" style="text-align:right">${num(r.signups)}<div style="font-size:11px; ${rateColor(r.signup_rate, 5, 2)}">${pct(r.signup_rate)}</div></td>
       <td class="mono" style="text-align:right">${num(r.pays)}<div style="font-size:11px; ${rateColor(r.pay_rate, 1, 0.3)}">${pct(r.pay_rate)}</div></td>
       <td class="mono" style="text-align:right">${r.gsc_clicks == null ? "—" : `${num(r.gsc_clicks)}<div class="muted" style="font-size:11px">${num(r.gsc_impressions)} impr · ${pct(r.gsc_ctr)}${r.gsc_position != null ? ` · #${Number(r.gsc_position).toFixed(1)}` : ""}</div>`}</td>
-      <td class="mono" style="text-align:right">${r.ad_spend == null ? "—" : `${money(r.ad_spend)}<div class="muted" style="font-size:11px">${r.cpa != null ? `CPA ${money(r.cpa)}` : `${num(r.ad_clicks)} clicks`}</div>`}</td>
+      <td class="mono" style="text-align:right">${r.ad_spend == null && r.paid_visitors == null ? "—" : `${r.ad_spend != null ? money(r.ad_spend) : ""}<div class="muted" style="font-size:11px">${[
+        r.cpa != null ? `CPA ${money(r.cpa)}` : null,
+        r.ad_clicks != null ? `${num(r.ad_clicks)} clicks` : null,
+        r.paid_visitors != null ? `${num(r.paid_visitors)} paid visits · ${num(r.paid_signups)} signups` : null,
+      ].filter(Boolean).join("<br>")}`}</div>`}</td>
       <td class="mono" style="text-align:right">${r.seo_score == null ? `<span class="muted">—</span>` : `<span style="color:${scoreColor(r.seo_score)}">${r.seo_score}</span>`}</td>
       <td style="text-align:right; white-space:nowrap">
         <button class="btn btn-sm btn-devin" data-lp-devin="${p.id}" title="Send to Devin">◆</button>

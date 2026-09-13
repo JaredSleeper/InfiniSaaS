@@ -559,6 +559,7 @@ function campModal(projectId, existing = null) {
       <label>Status</label><select name="status">${options(CAMP_STATUSES, c.status || "planned")}</select>
       <label>Budget ($, optional)</label><input name="budget" type="number" step="any" value="${c.budget ?? ""}">
       <label>URL (optional)</label><input name="url" value="${esc(c.url || "")}">
+      <label>utm_campaign (optional) <span class="muted">— set this in the ad URL; events carrying it count as paid traffic</span></label><input name="utm_campaign" value="${esc(c.utm_campaign || "")}">
       <label>Notes</label><textarea name="notes">${esc(c.notes || "")}</textarea>
       <div class="form-error"></div>
       <div class="actions">
@@ -570,6 +571,7 @@ function campModal(projectId, existing = null) {
       name: fd.get("name"), channel: fd.get("channel"), status: fd.get("status"),
       budget: fd.get("budget") ? Number(fd.get("budget")) : null,
       url: fd.get("url") || null, notes: fd.get("notes"),
+      utm_campaign: fd.get("utm_campaign") || null,
     };
     const method = existing ? "PATCH" : "POST";
     const path = existing ? `/api/campaigns/${existing.id}` : `/api/campaigns/projects/${projectId}`;

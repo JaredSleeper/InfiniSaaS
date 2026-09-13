@@ -181,6 +181,52 @@ async def _event_stats(project: dict, days: int) -> dict[str, dict]:
     return {(r["path"] or "/"): dict(r) for r in rows}
 
 
+async def _paid_event_stats(
+    project: dict, utms: list[str], days: int
+) -> dict[tuple[str, str], dict]:
+    """First-touch visitors/conversions per (path, utm_campaign) for paid attribution."""
+    if not utms:
+        return {}
+    pool = await get_pool()
+    visit, signup, pay = _funnel(project)
+    rows = await pool.fetch(
+        """
+        WITH visits AS (
+            SELECT user_key, ts,
+                   rtrim('/' || ltrim(regexp_replace(regexp_replace(properties->>'path',
+                                      '^https?://[^/]*', ''), '[?#].*$', ''), '/'), '/') AS path,
+                   COALESCE(properties->>'utm_campaign',
+                            properties->>'initial_utm_campaign') AS utm
+            FROM events
+            WHERE project_id = $1 AND name = $2 AND ts > now() - make_interval(days => $3)
+              AND NULLIF(properties->>'path', '') IS NOT NULL
+              AND COALESCE(properties->>'utm_campaign',
+                           properties->>'initial_utm_campaign') = ANY($4)
+        ),
+        first_touch AS (
+            SELECT DISTINCT ON (user_key) user_key, path, utm
+            FROM visits WHERE user_key IS NOT NULL ORDER BY user_key, ts
+        )
+        SELECT ft.path, ft.utm,
+               count(*) AS visitors,
+               count(*) FILTER (WHERE EXISTS (
+                   SELECT 1 FROM events e WHERE e.project_id = $1 AND e.name = $5
+                     AND e.user_key = ft.user_key)) AS signups,
+               count(*) FILTER (WHERE EXISTS (
+                   SELECT 1 FROM events e WHERE e.project_id = $1 AND e.name = $6
+                     AND e.user_key = ft.user_key)) AS pays
+        FROM first_touch ft GROUP BY ft.path, ft.utm
+        """,
+        project["id"],
+        visit,
+        days,
+        utms,
+        signup,
+        pay,
+    )
+    return {(r["path"] or "/", r["utm"]): dict(r) for r in rows}
+
+
 async def _gsc_stats(project_id: UUID) -> dict[str, dict]:
     pool = await get_pool()
     rows = await pool.fetch(
@@ -246,7 +292,8 @@ async def _project_performance(project: dict, days: int) -> tuple[list, list]:
     pool = await get_pool()
     pages = await pool.fetch(
         """
-        SELECT lp.*, c.name AS campaign_name FROM landing_pages lp
+        SELECT lp.*, c.name AS campaign_name, c.utm_campaign AS campaign_utm
+        FROM landing_pages lp
         LEFT JOIN campaigns c ON c.id = lp.campaign_id
         WHERE lp.project_id = $1 AND lp.status NOT IN ('idea', 'vetted', 'rejected')
         ORDER BY lp.created_at
@@ -257,18 +304,22 @@ async def _project_performance(project: dict, days: int) -> tuple[list, list]:
     gsc = await _gsc_stats(project["id"])
     ads = await _ad_stats(project["id"], days)
     audits = await _audit_scores(project["id"])
+    utms = list({r["campaign_utm"] for r in pages if r["campaign_utm"]})
+    paid = await _paid_event_stats(project, utms, days)
 
     perf: list[LandingPagePerf] = []
     registered: set[str] = set()
     for row in pages:
         page = dict(row)
         campaign_name = page.pop("campaign_name")
+        campaign_utm = page.pop("campaign_utm")
         path = _norm_path(page["path"]) or "/"
         registered.add(path)
         url_path = _url_path(page["url"]) or path
         ev = events.get(path) or events.get(url_path) or {}
         g = gsc.get(url_path) or gsc.get(path) or {}
         ad = ads.get(page["campaign_id"]) if page["campaign_id"] else None
+        p = paid.get((path, campaign_utm)) or paid.get((url_path, campaign_utm)) or {}
         audit = audits.get(url_path) or audits.get(path) or {}
         visitors = int(ev.get("visitors", 0))
         signups = int(ev.get("signups", 0))
@@ -299,6 +350,9 @@ async def _project_performance(project: dict, days: int) -> tuple[list, list]:
                 ad_conversions=(
                     int(ad["conversions"]) if ad and ad["conversions"] is not None else None
                 ),
+                paid_visitors=int(p["visitors"]) if p else None,
+                paid_signups=int(p["signups"]) if p else None,
+                paid_pays=int(p["pays"]) if p else None,
                 cpa=round(spend / signups, 2) if spend and signups else None,
                 seo_score=audit.get("score"),
                 seo_audit_at=audit.get("ts"),

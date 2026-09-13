@@ -36,8 +36,9 @@ async def create_campaign(project_id: UUID, body: CampaignCreate) -> CampaignOut
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        INSERT INTO campaigns (project_id, name, channel, status, budget, url, notes)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO campaigns
+            (project_id, name, channel, status, budget, url, notes, utm_campaign)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
         """,
         project_id,
@@ -47,6 +48,7 @@ async def create_campaign(project_id: UUID, body: CampaignCreate) -> CampaignOut
         body.budget,
         body.url,
         body.notes,
+        body.utm_campaign,
     )
     return CampaignOut(**dict(row))
 
@@ -69,6 +71,7 @@ async def update_campaign(campaign_id: UUID, body: CampaignUpdate) -> CampaignOu
         """
         UPDATE campaigns
         SET name = $2, channel = $3, status = $4, budget = $5, url = $6, notes = $7,
+            utm_campaign = $10,
             started_at = CASE
                 WHEN $4 = 'active' AND started_at IS NULL AND $8::timestamptz IS NULL
                     THEN now()
@@ -92,6 +95,7 @@ async def update_campaign(campaign_id: UUID, body: CampaignUpdate) -> CampaignOu
         merged["notes"],
         updates.get("started_at"),
         updates.get("ended_at"),
+        merged["utm_campaign"],
     )
     return CampaignOut(**dict(row))
 

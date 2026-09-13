@@ -54,6 +54,17 @@ CONTEXT_PROPS = {
     "$os": "os",
     "$device_type": "device_type",
     "$geoip_country_code": "country",
+    # Campaign attribution (PostHog stores utm_* unprefixed on events; the
+    # $-variants and $initial_* cover other capture paths and first touch).
+    "$utm_source": "utm_source",
+    "$utm_medium": "utm_medium",
+    "$utm_campaign": "utm_campaign",
+    "$utm_content": "utm_content",
+    "$utm_term": "utm_term",
+    "$gclid": "gclid",
+    "$initial_utm_source": "initial_utm_source",
+    "$initial_utm_medium": "initial_utm_medium",
+    "$initial_utm_campaign": "initial_utm_campaign",
 }
 PAGE_SIZE = 5000
 MAX_BACKFILL_ROWS = 50_000
