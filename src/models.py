@@ -126,6 +126,7 @@ class CampaignCreate(BaseModel):
     budget: float | None = None
     url: str | None = None
     notes: str = ""
+    utm_campaign: str | None = None
 
 
 class CampaignUpdate(BaseModel):
@@ -135,6 +136,7 @@ class CampaignUpdate(BaseModel):
     budget: float | None = None
     url: str | None = None
     notes: str | None = None
+    utm_campaign: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
 
@@ -148,6 +150,7 @@ class CampaignOut(BaseModel):
     budget: float | None
     url: str | None
     notes: str
+    utm_campaign: str | None
     started_at: datetime | None
     ended_at: datetime | None
     created_at: datetime
@@ -835,6 +838,9 @@ class LandingPagePerf(BaseModel):
     ad_clicks: int | None
     ad_conversions: int | None
     cpa: float | None
+    paid_visitors: int | None
+    paid_signups: int | None
+    paid_pays: int | None
     seo_score: int | None
     seo_audit_at: datetime | None
     campaign_name: str | None

@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS utm_campaign text;
+
 CREATE TABLE IF NOT EXISTS learnings (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id    uuid REFERENCES projects(id) ON DELETE CASCADE,

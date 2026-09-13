@@ -489,13 +489,27 @@ async def test_posthog_shared_project_routing(client, project):
     ts = (datetime.now(UTC) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
     def ev(props):
-        return {"event": {"uuid": str(uuid4()), "event": "$pageview",
-                          "distinct_id": "u1", "timestamp": ts, "properties": props}}
+        return {
+            "event": {
+                "uuid": str(uuid4()),
+                "event": "$pageview",
+                "distinct_id": "u1",
+                "timestamp": ts,
+                "properties": props,
+            }
+        }
 
     batch = [
         ev({"$pathname": "/speedreading", "$current_url": "https://getbetterat.xyz/speedreading"}),
-        {"event": {"uuid": str(uuid4()), "event": "subscription_created", "distinct_id": "u1",
-                   "timestamp": ts, "properties": {"app_slug": "speed-reading", "tier": "pro"}}},
+        {
+            "event": {
+                "uuid": str(uuid4()),
+                "event": "subscription_created",
+                "distinct_id": "u1",
+                "timestamp": ts,
+                "properties": {"app_slug": "speed-reading", "tier": "pro"},
+            }
+        },
         ev({"$pathname": "/", "$current_url": "https://getbetterat.xyz/"}),
     ]
     r = await client.post("/api/v1/posthog", json=batch, headers=headers)
@@ -506,10 +520,50 @@ async def test_posthog_shared_project_routing(client, project):
     ).json()
     names = {e["name"] for e in speed_recent}
     assert "subscription_created" in names
-    assert any(e["name"] == "visit" and e["properties"].get("path") == "/speedreading"
-               for e in speed_recent)
+    assert any(
+        e["name"] == "visit" and e["properties"].get("path") == "/speedreading"
+        for e in speed_recent
+    )
 
     bj_recent = (
         await client.get(f"/api/analytics/recent?project_id={project['id']}&limit=20")
     ).json()
     assert any(e["properties"].get("path") == "/" for e in bj_recent)
+
+
+async def test_paid_attribution_via_utm(client, project):
+    """Campaign utm_campaign + event utm params -> paid funnel on landing perf."""
+    camp = (
+        await client.post(
+            f"/api/campaigns/projects/{project['id']}",
+            json={"name": "Test Ads", "channel": "paid", "utm_campaign": "testads"},
+        )
+    ).json()
+    assert camp["utm_campaign"] == "testads"
+    token = (await client.get(f"/api/projects/{project['id']}/ingest-token")).json()["ingest_token"]
+    ts = (datetime.now(UTC) + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    u = str(uuid4())
+    r = await client.post(
+        "/api/v1/posthog",
+        json={
+            "event": {
+                "uuid": u,
+                "event": "$pageview",
+                "distinct_id": "paid_user",
+                "timestamp": ts,
+                "properties": {"$pathname": "/blackjack", "utm_campaign": "testads"},
+            }
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 202, r.text
+    r = await client.post(
+        f"/api/landing-pages/projects/{project['id']}",
+        json={"name": "BJ page", "path": "/blackjack", "status": "live", "campaign_id": camp["id"]},
+    )
+    assert r.status_code in (200, 201), r.text
+    perf = (
+        await client.get(f"/api/landing-pages/performance?project_id={project['id']}&days=365")
+    ).json()
+    row = next(p for p in perf["pages"] if p["page"]["path"] == "/blackjack")
+    assert row["paid_visitors"] == 1
