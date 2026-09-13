@@ -551,7 +551,7 @@ async def test_paid_attribution_via_utm(client, project):
                 "event": "$pageview",
                 "distinct_id": "paid_user",
                 "timestamp": ts,
-                "properties": {"$pathname": "/blackjack", "utm_campaign": "testads"},
+                "properties": {"$pathname": "/bj-paid-test", "utm_campaign": "testads"},
             }
         },
         headers={"Authorization": f"Bearer {token}"},
@@ -559,11 +559,16 @@ async def test_paid_attribution_via_utm(client, project):
     assert r.status_code == 202, r.text
     r = await client.post(
         f"/api/landing-pages/projects/{project['id']}",
-        json={"name": "BJ page", "path": "/blackjack", "status": "live", "campaign_id": camp["id"]},
+        json={
+            "name": "BJ paid test",
+            "path": "/bj-paid-test",
+            "status": "live",
+            "campaign_id": camp["id"],
+        },
     )
     assert r.status_code in (200, 201), r.text
     perf = (
         await client.get(f"/api/landing-pages/performance?project_id={project['id']}&days=365")
     ).json()
-    row = next(p for p in perf["pages"] if p["page"]["path"] == "/blackjack")
+    row = next(p for p in perf["pages"] if p["page"]["path"] == "/bj-paid-test")
     assert row["paid_visitors"] == 1
