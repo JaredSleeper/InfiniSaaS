@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import re
+import socket
 import time
 from html import unescape
 from urllib.parse import urljoin, urlparse
@@ -10,6 +13,82 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 _TAG = re.compile(r"<[^>]+>")
+
+MAX_REDIRECTS = 5
+MAX_BODY_BYTES = 2 * 1024 * 1024
+_HEADERS = {"User-Agent": "Mozilla/5.0 infinisaas-seo/1.0"}
+
+
+class UnsafeURL(ValueError):
+    pass
+
+
+def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+        or (isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local)
+    )
+
+
+async def validate_url(url: str) -> str:
+    """Reject non-http(s) URLs and hosts resolving to non-public addresses."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise UnsafeURL("Only http/https URLs can be audited")
+    host = parsed.hostname
+    if not host:
+        raise UnsafeURL("URL has no host")
+    if host.lower() in ("localhost", "metadata.google.internal") or host.endswith(".localhost"):
+        raise UnsafeURL("Host is not allowed")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        addrs = [literal]
+    else:
+        try:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            infos = await asyncio.get_running_loop().getaddrinfo(
+                host, port, type=socket.SOCK_STREAM
+            )
+        except socket.gaierror as exc:
+            raise UnsafeURL(f"Could not resolve host: {exc}") from exc
+        addrs = [ipaddress.ip_address(info[4][0]) for info in infos]
+    if not addrs or not all(_is_public_ip(a) for a in addrs):
+        raise UnsafeURL("Host resolves to a non-public address")
+    return url
+
+
+async def safe_get(client: httpx.AsyncClient, url: str) -> tuple[httpx.Response, str]:
+    """GET with each redirect hop validated and the body capped at MAX_BODY_BYTES."""
+    for _ in range(MAX_REDIRECTS + 1):
+        await validate_url(url)
+        req = client.build_request("GET", url, headers=_HEADERS)
+        r = await client.send(req, stream=True)
+        try:
+            if r.is_redirect and r.headers.get("location"):
+                url = urljoin(url, r.headers["location"])
+                continue
+            chunks: list[bytes] = []
+            size = 0
+            async for chunk in r.aiter_bytes():
+                size += len(chunk)
+                if size > MAX_BODY_BYTES:
+                    raise UnsafeURL(f"Response exceeds {MAX_BODY_BYTES} bytes")
+                chunks.append(chunk)
+        finally:
+            await r.aclose()
+        raw = b"".join(chunks)
+        return r, raw.decode(r.encoding or "utf-8", errors="replace")
+    raise UnsafeURL("Too many redirects")
 
 
 def _attr(tag: str, name: str) -> str | None:
@@ -32,9 +111,9 @@ async def audit(url: str) -> dict:
         findings.append({"severity": severity, "code": code, "message": message})
 
     t0 = time.monotonic()
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
         try:
-            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 infinisaas-seo/1.0"})
+            r, html = await safe_get(client, url)
         except Exception as exc:  # noqa: BLE001
             return {
                 "score": 0,
@@ -44,7 +123,6 @@ async def audit(url: str) -> dict:
                 "page": page,
             }
         ttfb_ms = int((time.monotonic() - t0) * 1000)
-        html = r.text
         page.update(status=r.status_code, final_url=str(r.url), ttfb_ms=ttfb_ms, bytes=len(html))
         if r.status_code >= 400:
             add("high", "status", f"Page returned HTTP {r.status_code}")
@@ -56,9 +134,9 @@ async def audit(url: str) -> dict:
         origin = f"{urlparse(str(r.url)).scheme}://{urlparse(str(r.url)).netloc}"
         robots_ok = sitemap_ok = None
         try:
-            rb = await client.get(urljoin(origin, "/robots.txt"))
+            rb, _ = await safe_get(client, urljoin(origin, "/robots.txt"))
             robots_ok = rb.status_code == 200
-            sm = await client.get(urljoin(origin, "/sitemap.xml"))
+            sm, _ = await safe_get(client, urljoin(origin, "/sitemap.xml"))
             sitemap_ok = sm.status_code == 200
         except Exception:  # noqa: BLE001, S110
             pass

@@ -35,6 +35,10 @@ async def run_audit(project_id: UUID, body: AuditRequest) -> SeoAuditOut:
     url = body.url or project.get("url")
     if not url:
         raise HTTPException(status_code=400, detail="Project has no URL to audit")
+    try:
+        await seo_audit.validate_url(url)
+    except seo_audit.UnsafeURL as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     result = await seo_audit.audit(url)
     pool = await get_pool()
     row = await pool.fetchrow(
