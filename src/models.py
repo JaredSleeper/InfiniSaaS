@@ -183,7 +183,9 @@ ContentStatus = Literal["idea", "drafting", "scheduled", "published"]
 CostCategory = Literal["infra", "ads", "tools", "llm", "contractors", "other"]
 AdPlatform = Literal["google", "meta", "reddit", "x", "tiktok", "linkedin", "other"]
 AlertCondition = Literal["below", "above", "drop_pct", "stale_days"]
-Provider = Literal["stripe", "github", "railway", "gsc", "posthog", "slack", "pagedrones", "custom"]
+Provider = Literal[
+    "stripe", "github", "railway", "gsc", "posthog", "slack", "pagedrones", "google_ads", "custom"
+]
 AgentKind = Literal["weekly_brief", "seo", "ads", "analytics", "landing_pages", "custom"]
 AgentSchedule = Literal["manual", "daily", "weekly"]
 RecKind = Literal["experiment", "task", "content", "alert", "insight", "landing_page"]

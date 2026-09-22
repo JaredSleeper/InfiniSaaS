@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
@@ -572,3 +572,118 @@ async def test_paid_attribution_via_utm(client, project):
     ).json()
     row = next(p for p in perf["pages"] if p["page"]["path"] == "/bj-paid-test")
     assert row["paid_visitors"] == 1
+
+
+async def test_googleads_sync_and_conversion_upload(client, project, monkeypatch):
+    """GAQL sync fills ad_spend + ad_metrics; gclid events upload once."""
+    from src.integrations import googleads
+
+    async def fake_token(creds):
+        return "tok"
+
+    def stream_for(gaql):
+        if "FROM campaign" in gaql:
+            return [
+                {
+                    "segments": {"date": "2026-09-20"},
+                    "campaign": {"id": "111", "name": "PD Search", "status": "ENABLED"},
+                    "metrics": {
+                        "costMicros": "12500000",
+                        "impressions": 500,
+                        "clicks": 40,
+                        "conversions": 2,
+                    },
+                }
+            ]
+        if "FROM keyword_view" in gaql:
+            return [
+                {
+                    "segments": {"date": "2026-09-20"},
+                    "campaign": {"id": "111"},
+                    "adGroup": {"id": "7", "name": "AG1"},
+                    "adGroupCriterion": {"keyword": {"text": "website monitor"}},
+                    "metrics": {
+                        "costMicros": "8000000",
+                        "impressions": 300,
+                        "clicks": 25,
+                        "conversions": 1,
+                    },
+                }
+            ]
+        if "FROM search_term_view" in gaql:
+            return [
+                {
+                    "segments": {"date": "2026-09-20"},
+                    "campaign": {"id": "111"},
+                    "searchTermView": {"searchTerm": "monitor reddit for keywords"},
+                    "metrics": {
+                        "costMicros": "4000000",
+                        "impressions": 200,
+                        "clicks": 15,
+                        "conversions": 1,
+                    },
+                }
+            ]
+        return []
+
+    async def fake_stream(token, creds, cfg, gaql):
+        return stream_for(gaql)
+
+    uploads: list[dict] = []
+
+    async def fake_upload(headers, cid, conv):
+        uploads.append(conv)
+        return {}
+
+    monkeypatch.setattr(googleads, "_access_token", fake_token)
+    monkeypatch.setattr(googleads, "_search_stream", fake_stream)
+    monkeypatch.setattr(googleads, "_upload_click_conversion", fake_upload)
+
+    pool = await get_pool()
+    pid = UUID(project["id"])
+    gclid = f"gads-test-{uuid4().hex[:12]}"
+    await pool.execute(
+        """INSERT INTO events (project_id, name, ts, user_key, properties, source)
+           VALUES ($1, 'monitor_created', now(), 'u1',
+                   jsonb_build_object('gclid', $2::text), 'posthog')""",
+        pid,
+        gclid,
+    )
+
+    cfg = {
+        "customer_id": "123-456-7890",
+        "conv_action_monitor_created": "555",
+    }
+    secret = '{"client_id":"c","client_secret":"s","refresh_token":"r","developer_token":"d"}'
+    result = await googleads.sync(pid, cfg, secret)
+    assert result["campaign_days"] == 1
+    assert result["keyword_days"] == 1 and result["search_term_days"] == 1
+    assert result["conversions_uploaded"] == 1
+    assert uploads[0]["gclid"] == gclid
+    assert uploads[0]["conversionAction"] == "customers/1234567890/conversionActions/555"
+
+    camp = await pool.fetchrow(
+        "SELECT * FROM campaigns WHERE project_id = $1 AND external_id = 'gads:111'", pid
+    )
+    assert camp and camp["name"] == "PD Search" and camp["channel"] == "paid"
+    spend = await pool.fetchrow(
+        "SELECT * FROM ad_spend WHERE project_id = $1 AND campaign_id = $2 AND day = $3",
+        pid,
+        camp["id"],
+        date(2026, 9, 20),
+    )
+    assert float(spend["spend"]) == 12.5 and spend["source"] == "google_ads"
+
+    kw = await pool.fetchrow(
+        "SELECT * FROM ad_metrics WHERE project_id = $1 AND level = 'keyword'", pid
+    )
+    assert kw["name"] == "website monitor" and float(kw["spend"]) == 8.0
+    st = await pool.fetchrow(
+        "SELECT * FROM ad_metrics WHERE project_id = $1 AND level = 'search_term'", pid
+    )
+    assert st["name"] == "monitor reddit for keywords"
+
+    # Re-run: events already in conversion_uploads are not re-uploaded.
+    uploads.clear()
+    result2 = await googleads.sync(pid, cfg, secret)
+    assert result2["conversions_uploaded"] == 0 and uploads == []

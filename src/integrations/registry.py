@@ -80,6 +80,37 @@ PROVIDERS: dict[str, dict] = {
             "project's Landing pages tab"
         ),
     },
+    "google_ads": {
+        "label": "Google Ads",
+        "scope": "project",
+        "secret_label": (
+            'JSON: {"client_id","client_secret","refresh_token","developer_token"} '
+            "(OAuth client + developer token from Tools → API Center)"
+        ),
+        "config_fields": [
+            {"key": "customer_id", "label": "Customer ID (xxx-xxx-xxxx)", "required": True},
+            {
+                "key": "login_customer_id",
+                "label": "Manager (MCC) customer ID — only if accessing via a manager",
+                "required": False,
+            },
+            {
+                "key": "conv_action_monitor_created",
+                "label": "Conversion action ID for monitor_created (primary)",
+                "required": False,
+            },
+            {
+                "key": "conv_action_signup_completed",
+                "label": "Conversion action ID for signup_completed (secondary)",
+                "required": False,
+            },
+        ],
+        "syncs": (
+            "Nightly: spend/impr/clicks/conversions per campaign into ad_spend, keyword + "
+            "search-term stats into ad_metrics; also uploads gclid conversions back to Google "
+            "so Smart Bidding optimizes on real signups"
+        ),
+    },
     "slack": {
         "label": "Slack",
         "scope": "global",

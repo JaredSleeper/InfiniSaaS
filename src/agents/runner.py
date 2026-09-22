@@ -214,7 +214,26 @@ async def _ads_context(project_id: UUID) -> dict:
            FROM ad_spend WHERE project_id = $1 AND day > current_date - 90 GROUP BY 1 ORDER BY 1""",
         project_id,
     )
+    terms = await pool.fetch(
+        """SELECT level, name, sum(spend) AS spend, sum(clicks) AS clicks,
+                  sum(conversions) AS conv
+           FROM ad_metrics
+           WHERE project_id = $1 AND day > current_date - 30
+           GROUP BY level, name ORDER BY spend DESC LIMIT 40""",
+        project_id,
+    )
     return {
+        "terms_30d": [
+            {
+                "level": r["level"],
+                "name": r["name"],
+                "spend": float(r["spend"]),
+                "clicks": r["clicks"],
+                "conversions": float(r["conv"]),
+                "cpa": round(float(r["spend"]) / float(r["conv"]), 2) if r["conv"] else None,
+            }
+            for r in terms
+        ],
         "by_platform_30d": [
             {
                 **dict(r),

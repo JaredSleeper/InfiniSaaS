@@ -151,7 +151,7 @@ CREATE INDEX IF NOT EXISTS events_project_name_idx ON events (project_id, name);
 ALTER TABLE integrations DROP CONSTRAINT IF EXISTS integrations_provider_check;
 ALTER TABLE integrations ADD CONSTRAINT integrations_provider_check
     CHECK (provider IN ('stripe', 'github', 'railway', 'gsc', 'posthog', 'slack', 'pagedrones',
-                        'custom'));
+                        'google_ads', 'custom'));
 
 ALTER TABLE events ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'ingest';
 ALTER TABLE events ADD COLUMN IF NOT EXISTS external_id text;
@@ -613,3 +613,43 @@ BEGIN
         WHERE project_id = blackjack_id AND provider = 'posthog' AND secret_enc IS NULL;
     END IF;
 END $$;
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- v2.5: Google Ads — granular metrics + offline-conversion upload ledger.
+-- ────────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS external_id text;
+
+CREATE TABLE IF NOT EXISTS ad_metrics (
+    id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id            uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    campaign_id           uuid REFERENCES campaigns(id) ON DELETE SET NULL,
+    platform              text NOT NULL DEFAULT 'google',
+    level                 text NOT NULL
+                          CHECK (level IN ('ad_group', 'keyword', 'search_term', 'ad')),
+    external_campaign_id  text NOT NULL DEFAULT '',
+    external_ad_group_id  text NOT NULL DEFAULT '',
+    external_id           text NOT NULL DEFAULT '',
+    name                  text NOT NULL DEFAULT '',
+    day                   date NOT NULL,
+    spend                 numeric NOT NULL DEFAULT 0,
+    impressions           integer NOT NULL DEFAULT 0,
+    clicks                integer NOT NULL DEFAULT 0,
+    conversions           numeric NOT NULL DEFAULT 0,
+    created_at            timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, platform, level, external_id, day)
+);
+CREATE INDEX IF NOT EXISTS ad_metrics_project_day_idx ON ad_metrics (project_id, day DESC);
+CREATE INDEX IF NOT EXISTS ad_metrics_spend_idx ON ad_metrics (project_id, level, spend DESC);
+
+-- gclid-keyed ledger of offline conversions pushed to Google Ads.
+CREATE TABLE IF NOT EXISTS conversion_uploads (
+    id                    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id            uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    gclid                 text NOT NULL,
+    conversion_action_id  text NOT NULL DEFAULT '',
+    event_name            text NOT NULL,
+    conversion_ts         timestamptz NOT NULL,
+    uploaded_at           timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, gclid, event_name)
+);
